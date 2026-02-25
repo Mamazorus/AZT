@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ═══════════════════════════════════════════════════════════════
+   CUSTOM FONT
+   ═══════════════════════════════════════════════════════════════ */
+@font-face {
+  font-family: 'PP Neue Montreal';
+  src: url('/fonts/ppneuemontreal-medium.otf') format('opentype');
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   BASE STYLES
+   ═══════════════════════════════════════════════════════════════ */
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: 'PP Neue Montreal', sans-serif;
+  @apply bg-white text-black min-h-screen overflow-x-hidden flex flex-col;
+  line-height: 1.4;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   CUSTOM UTILITIES
+   ═══════════════════════════════════════════════════════════════ */
+@layer components {
+  /* Header */
+  .header-link {
+    @apply text-sm font-normal tracking-wide uppercase transition-opacity duration-fast;
+  }
+  .header-link:hover {
+    @apply opacity-60;
+  }
+
+  /* Controls */
+  .control-btn {
+    @apply text-sm font-normal text-muted transition-colors duration-fast p-1;
+  }
+  .control-btn:hover,
+  .control-btn.active {
+    @apply text-black;
+  }
+
+  .filter-btn {
+    @apply text-sm font-normal tracking-wide uppercase text-muted transition-colors duration-fast;
+  }
+  .filter-btn:hover,
+  .filter-btn.active {
+    @apply text-black;
+  }
+
+  /* Project Card */
+  .project-card {
+    @apply cursor-pointer transition-all duration-base;
+  }
+  .project-card:hover {
+    @apply opacity-90;
+    filter: sepia(1);
+  }
+
+  /* Modal variant overlay */
+  .variant-overlay {
+    @apply absolute inset-0 bg-gray-500/40 transition-opacity duration-fast;
+  }
+  .variant-overlay.active,
+  .group:hover .variant-overlay {
+    @apply opacity-0;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   RESPONSIVE OVERRIDES
+   ═══════════════════════════════════════════════════════════════ */
+@media (max-width: 768px) {
+  :root {
+    --page-padding: 1rem;
+  }
+}
