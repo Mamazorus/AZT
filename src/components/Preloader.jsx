@@ -56,7 +56,7 @@ export default function Preloader({ onComplete }) {
         alt="Logo"
         className="w-[55vw] max-w-lg select-none"
         style={{
-          transform:  `scale(${(0.15 + (progress / 100) * 0.85).toFixed(3)}) rotate(${(progress * 0.1).toFixed(1)}deg)`,
+          transform:  `scale(${(0.15 + (progress / 100) * 0.85).toFixed(3)}) rotate(${(10 - progress * 0.1).toFixed(1)}deg)`,
           transition: 'transform 0.12s ease-out',
         }}
         draggable={false}
