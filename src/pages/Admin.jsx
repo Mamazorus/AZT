@@ -1115,8 +1115,14 @@ export default function Admin() {
   return (
     <div className="min-h-screen bg-white">
       <header className="fixed top-0 left-0 right-0 h-[60px] px-6 flex items-center justify-between bg-white border-b border-gray-100 z-[100]">
-        <Link to="/" className="text-sm font-medium tracking-wide uppercase transition-opacity duration-150 hover:opacity-60">
-          MAËL AUZENET
+        <Link to="/" className="flex items-center">
+          <img
+            src="/logo.svg"
+            alt="Logo"
+            className="transition-opacity duration-150 hover:opacity-75"
+            style={{ height: '30px', filter: 'invert(1)' }}
+            draggable={false}
+          />
         </Link>
         <span className="text-xs text-muted uppercase tracking-widest">ADMIN</span>
         <button

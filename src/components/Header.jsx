@@ -20,11 +20,14 @@ export default function Header() {
   return (
     <header className="fixed top-0 left-0 right-0 h-[60px] px-6 flex items-center justify-between bg-white z-[100]">
       {/* Logo */}
-      <Link 
-        to="/" 
-        className="text-sm font-medium tracking-wide uppercase transition-opacity duration-150 hover:opacity-60"
-      >
-        MAËL AUZENET
+      <Link to="/" className="flex items-center">
+        <img
+          src="/logo.svg"
+          alt="Logo"
+          className="transition-opacity duration-150 hover:opacity-75"
+          style={{ height: '30px', filter: 'invert(1)' }}
+          draggable={false}
+        />
       </Link>
 
       {/* Center text - hidden on mobile */}

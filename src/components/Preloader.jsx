@@ -45,17 +45,29 @@ export default function Preloader({ onComplete }) {
     <div
       className="fixed inset-0 z-[500] bg-black flex items-center justify-center overflow-hidden"
       style={{
-        transform:  fading ? 'translateY(100%)' : 'translateY(0)',
-        transition: fading ? 'transform 0.7s cubic-bezier(0.32,0.72,0,1)' : 'none',
+        transform:     fading ? 'translateY(100%)' : 'translateY(0)',
+        transition:    fading ? 'transform 0.7s cubic-bezier(0.32,0.72,0,1)' : 'none',
         pointerEvents: fading ? 'none' : 'auto',
       }}
     >
+      {/* Logo centré — grossit de 15% à 100% au fil du chargement */}
+      <img
+        src="/logo.svg"
+        alt="Logo"
+        className="w-[55vw] max-w-lg select-none"
+        style={{
+          transform:  `scale(${(0.15 + (progress / 100) * 0.85).toFixed(3)}) rotate(${(progress * 0.1).toFixed(1)}deg)`,
+          transition: 'transform 0.12s ease-out',
+        }}
+        draggable={false}
+      />
+
+      {/* Pourcentage en bas à droite */}
       <span
-        className="text-white font-medium tabular-nums leading-none select-none"
-        style={{ fontSize: '22vw' }}
+        className="absolute bottom-7 right-8 text-white/50 font-medium tabular-nums select-none"
+        style={{ fontSize: '0.75rem', letterSpacing: '0.1em' }}
       >
-        {progress}
-        <span style={{ fontSize: '5vw', marginLeft: '0.08em' }}>%</span>
+        {progress} %
       </span>
     </div>
   )
