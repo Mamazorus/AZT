@@ -1,6 +1,6 @@
-export default function ProjectCard({ project, onClick }) {
+export default function ProjectCard({ project, onClick, style }) {
   return (
-    <article className="cursor-pointer group" onClick={() => onClick(project)}>
+    <article data-card style={style} className="cursor-pointer group" onClick={() => onClick(project)}>
 
       <div className="relative overflow-hidden">
         <img

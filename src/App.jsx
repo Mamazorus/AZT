@@ -16,7 +16,7 @@ export default function App() {
     <ProjectsProvider>
       {!ready && <Preloader onComplete={() => setReady(true)} />}
 
-      <div className={`min-h-screen flex flex-col ${ready ? '' : 'invisible'}`}>
+      <div className={`min-h-screen flex flex-col ${ready ? 'site-ready' : 'opacity-0 pointer-events-none'}`}>
         <Routes>
           {/* Admin — page standalone sans Header/Footer */}
           <Route path="/admin" element={<Admin />} />

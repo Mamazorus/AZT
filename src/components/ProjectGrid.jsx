@@ -24,12 +24,13 @@ export default function ProjectGrid({ projects = [], currentFilter, currentColum
 
   return (
     <section className="px-4 md:px-6 py-6">
-      <div className={getGridClasses()}>
-        {filteredProjects.map((project) => (
-          <ProjectCard 
-            key={project.id} 
-            project={project} 
+      <div key={currentColumns} className={getGridClasses()}>
+        {filteredProjects.map((project, i) => (
+          <ProjectCard
+            key={project.id}
+            project={project}
             onClick={onProjectClick}
+            style={{ animationDelay: `${Math.min(i * 40, 500)}ms` }}
           />
         ))}
       </div>

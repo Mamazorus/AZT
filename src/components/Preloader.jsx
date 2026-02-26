@@ -10,8 +10,8 @@ export default function Preloader({ onComplete }) {
     setProgress(100)
     setTimeout(() => {
       setFading(true)
-      setTimeout(onComplete, 500)
-    }, 150)
+      setTimeout(onComplete, 700)
+    }, 200)
   }, [onComplete])
 
   useEffect(() => {
@@ -43,12 +43,19 @@ export default function Preloader({ onComplete }) {
 
   return (
     <div
-      className={`fixed inset-0 z-[500] bg-white flex items-center justify-center transition-opacity duration-500 ${
-        fading ? 'opacity-0 pointer-events-none' : 'opacity-100'
-      }`}
+      className="fixed inset-0 z-[500] bg-black flex items-center justify-center overflow-hidden"
+      style={{
+        transform:  fading ? 'translateY(100%)' : 'translateY(0)',
+        transition: fading ? 'transform 0.7s cubic-bezier(0.32,0.72,0,1)' : 'none',
+        pointerEvents: fading ? 'none' : 'auto',
+      }}
     >
-      <span className="text-sm font-medium uppercase tracking-widest tabular-nums">
-        {progress}&nbsp;%
+      <span
+        className="text-white font-medium tabular-nums leading-none select-none"
+        style={{ fontSize: '22vw' }}
+      >
+        {progress}
+        <span style={{ fontSize: '5vw', marginLeft: '0.08em' }}>%</span>
       </span>
     </div>
   )

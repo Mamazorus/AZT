@@ -9,7 +9,7 @@ export default function Controls({
 }) {
 
   return (
-    <div className="fixed top-[60px] left-0 right-0 px-4 md:px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between bg-white z-[99] gap-4 md:gap-0">
+    <div data-controls className="fixed top-[60px] left-0 right-0 px-4 md:px-6 py-4 flex flex-col md:flex-row items-start md:items-center justify-between bg-white z-[99] gap-4 md:gap-0">
       {/* Grid buttons */}
       <div className="flex items-center gap-4">
         {GRID_OPTIONS.map((cols) => (
