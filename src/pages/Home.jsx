@@ -1,24 +1,18 @@
 import { useState } from 'react'
+import { useNavigate, Outlet } from 'react-router-dom'
 import Controls from '../components/Controls'
 import ProjectGrid from '../components/ProjectGrid'
-import Modal from '../components/Modal'
-import { useProjects } from '../hooks/useProjects'
+import { useProjectsContext } from '../context/ProjectsContext'
 
 export default function Home() {
-  const [currentFilter, setCurrentFilter]     = useState('all')
-  const [currentColumns, setCurrentColumns]   = useState(() => window.innerWidth < 640 ? 2 : 3)
-  const [selectedProject, setSelectedProject] = useState(null)
-  const [isModalOpen, setIsModalOpen]         = useState(false)
+  const [currentFilter, setCurrentFilter]   = useState('all')
+  const [currentColumns, setCurrentColumns] = useState(() => window.innerWidth < 640 ? 2 : 3)
 
-  const { projects, loading } = useProjects()
+  const { projects, loading } = useProjectsContext()
+  const navigate = useNavigate()
 
   const handleProjectClick = (project) => {
-    setSelectedProject(project)
-    setIsModalOpen(true)
-  }
-
-  const handleCloseModal = () => {
-    setIsModalOpen(false)
+    navigate(`/project/${project.id}`)
   }
 
   return (
@@ -46,11 +40,8 @@ export default function Home() {
         )}
       </main>
 
-      <Modal
-        project={selectedProject}
-        isOpen={isModalOpen}
-        onClose={handleCloseModal}
-      />
+      {/* ProjectPage se monte ici en tant que route enfant (fixed inset-0 → overlay) */}
+      <Outlet />
     </>
   )
 }

@@ -23,8 +23,10 @@ function withTimeout(promise, ms = 8000) {
 }
 
 // ─── Firestore helpers ────────────────────────────────────────────────────────
-async function uploadBlob(blob, projectId, slot) {
-  const path    = `projects/${projectId}/image-${slot}.jpg`
+async function uploadBlob(blob, projectId, slot, isVideo = false) {
+  const ext     = isVideo ? 'mp4' : 'jpg'
+  const prefix  = isVideo ? 'media' : 'image'
+  const path    = `projects/${projectId}/${prefix}-${slot}.${ext}`
   const fileRef = ref(storage, path)
   const task    = uploadBytesResumable(fileRef, blob)
 
@@ -44,13 +46,13 @@ async function getNextNumber() {
   return { number: String(snapshot.size + 1).padStart(2, '0'), order: snapshot.size }
 }
 
-async function addProject(form, blobs, thumbBlob) {
+async function addProject(form, blobs, blobTypes, thumbBlob) {
   const { number, order } = await getNextNumber()
   const tempId       = `temp_${Date.now()}`
   const uploadedUrls = ['', '', '', '']
 
   for (let i = 0; i < 4; i++) {
-    if (blobs[i]) uploadedUrls[i] = await uploadBlob(blobs[i], tempId, i)
+    if (blobs[i]) uploadedUrls[i] = await uploadBlob(blobs[i], tempId, i, blobTypes[i] === 'video')
   }
 
   let thumbnail = ''
@@ -58,25 +60,29 @@ async function addProject(form, blobs, thumbBlob) {
 
   const docRef = await withTimeout(
     addDoc(collection(db, 'projects'), {
-      number, order, ...form, images: uploadedUrls, thumbnail, createdAt: serverTimestamp(),
+      number, order, ...form, images: uploadedUrls, mediaTypes: blobTypes,
+      thumbnail, createdAt: serverTimestamp(),
     })
   )
 
-  return { id: docRef.id, number, order, ...form, images: uploadedUrls, thumbnail }
+  return { id: docRef.id, number, order, ...form, images: uploadedUrls, mediaTypes: blobTypes, thumbnail }
 }
 
-async function updateProject(id, form, blobs, existingUrls, thumbBlob, existingThumb) {
-  const finalUrls = [...existingUrls]
+async function updateProject(id, form, blobs, blobTypes, existingUrls, thumbBlob, existingThumb) {
+  const finalUrls   = [...existingUrls]
+  const finalTypes  = [...blobTypes]
 
   for (let i = 0; i < 4; i++) {
-    if (blobs[i]) finalUrls[i] = await uploadBlob(blobs[i], id, i)
+    if (blobs[i]) finalUrls[i] = await uploadBlob(blobs[i], id, i, blobTypes[i] === 'video')
   }
 
   let thumbnail = existingThumb ?? ''
   if (thumbBlob) thumbnail = await uploadBlob(thumbBlob, id, 'thumb')
 
-  await withTimeout(updateDoc(doc(db, 'projects', id), { ...form, images: finalUrls, thumbnail }))
-  return { images: finalUrls, thumbnail }
+  await withTimeout(updateDoc(doc(db, 'projects', id), {
+    ...form, images: finalUrls, mediaTypes: finalTypes, thumbnail,
+  }))
+  return { images: finalUrls, mediaTypes: finalTypes, thumbnail }
 }
 
 async function deleteProject(project) {
@@ -155,6 +161,56 @@ async function getCroppedBlob(imageSrc, pixelCrop, rotation = 0, maxDim = 1920) 
   return new Promise(resolve => outCanvas.toBlob(resolve, 'image/jpeg', 0.85))
 }
 
+// ─── Vidéo : trim + crop + compress via FFmpeg.wasm ──────────────────────────
+const FFMPEG_VERSION = '0.12.6'
+
+async function processVideo(videoSrc, trimStart, trimEnd, cropPixels, onProgress, onLoadingDone) {
+  const { FFmpeg }               = await import('@ffmpeg/ffmpeg')
+  const { fetchFile, toBlobURL } = await import('@ffmpeg/util')
+
+  const ffmpeg = new FFmpeg()
+  ffmpeg.on('progress', ({ progress }) =>
+    onProgress(Math.round(Math.min(100, Math.max(0, progress * 100))))
+  )
+
+  const base = `https://unpkg.com/@ffmpeg/core@${FFMPEG_VERSION}/dist/esm`
+  await ffmpeg.load({
+    coreURL: await toBlobURL(`${base}/ffmpeg-core.js`,   'text/javascript'),
+    wasmURL: await toBlobURL(`${base}/ffmpeg-core.wasm`, 'application/wasm'),
+  })
+  onLoadingDone?.() // FFmpeg prêt, passage en phase "traitement"
+
+  await ffmpeg.writeFile('input.mp4', await fetchFile(videoSrc))
+
+  const filters = []
+  if (cropPixels) {
+    const { x, y, width, height } = cropPixels
+    filters.push(`crop=${width}:${height}:${x}:${y}`)
+  }
+  filters.push('scale=trunc(iw/2)*2:trunc(ih/2)*2')
+
+  const args = [
+    '-i',       'input.mp4',
+    '-ss',      String(trimStart),
+    '-to',      String(trimEnd),
+    '-vf',      filters.join(','),
+    '-c:v',     'libx264',
+    '-crf',     '26',
+    '-preset',  'veryfast',
+    '-movflags','+faststart',
+    'output.mp4',
+  ]
+
+  await ffmpeg.exec(args)
+  const data = await ffmpeg.readFile('output.mp4')
+  return new Blob([data.buffer], { type: 'video/mp4' })
+}
+
+function formatTime(s) {
+  const m = Math.floor(s / 60)
+  return `${m}:${String(Math.floor(s % 60)).padStart(2, '0')}`
+}
+
 // ─── CropModal ────────────────────────────────────────────────────────────────
 const ASPECT_OPTIONS = [
   { label: '3:4',    value: 3 / 4 },
@@ -165,7 +221,8 @@ const ASPECT_OPTIONS = [
   { label: 'CUSTOM', value: 'custom' },
 ]
 
-function CropModal({ imageSrc, onConfirm, onCancel, lockedAspect }) {
+// onCropCoords : optionnel, utilisé pour le recadrage vidéo (retourne les coords, pas un blob)
+function CropModal({ imageSrc, onConfirm, onCancel, lockedAspect, onCropCoords }) {
   const [crop,              setCrop]              = useState({ x: 0, y: 0 })
   const [zoom,              setZoom]              = useState(1)
   const [rotation,          setRotation]          = useState(0)
@@ -195,6 +252,7 @@ function CropModal({ imageSrc, onConfirm, onCancel, lockedAspect }) {
 
   const handleConfirm = async () => {
     if (!croppedAreaPixels) return
+    if (onCropCoords) { onCropCoords(croppedAreaPixels); return }
     setProcessing(true)
     try {
       const blob = await getCroppedBlob(imageSrc, croppedAreaPixels, rotation)
@@ -298,6 +356,182 @@ function CropModal({ imageSrc, onConfirm, onCancel, lockedAspect }) {
           <button onClick={handleConfirm} disabled={processing} className="text-xs uppercase tracking-widest text-white hover:opacity-60 transition-opacity duration-150 disabled:opacity-30">
             {processing ? 'PROCESSING...' : 'CONFIRM'}
           </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─── VideoEditModal ───────────────────────────────────────────────────────────
+function VideoEditModal({ videoSrc, onConfirm, onCancel }) {
+  const videoRef = useRef()
+
+  const [duration,    setDuration]    = useState(0)
+  const [trimStart,   setTrimStart]   = useState(0)
+  const [trimEnd,     setTrimEnd]     = useState(0)
+  const [step,        setStep]        = useState('trim')   // 'trim' | 'crop' | 'loading' | 'processing'
+  const [frameUrl,    setFrameUrl]    = useState(null)
+  const [cropPixels,  setCropPixels]  = useState(null)
+  const [ffProgress,  setFfProgress]  = useState(0)
+  const [ffError,     setFfError]     = useState(null)
+
+  const handleLoaded = () => {
+    const d = videoRef.current?.duration || 0
+    setDuration(d)
+    setTrimEnd(d)
+  }
+
+  const extractFrame = () => {
+    const video = videoRef.current
+    if (!video) return
+    const canvas   = document.createElement('canvas')
+    canvas.width   = video.videoWidth
+    canvas.height  = video.videoHeight
+    canvas.getContext('2d').drawImage(video, 0, 0)
+    setFrameUrl(canvas.toDataURL('image/jpeg', 0.95))
+    setStep('crop')
+  }
+
+  const handleCropCoords = (pixels) => {
+    setCropPixels(pixels)
+    setFrameUrl(null)
+    setStep('trim')
+  }
+
+  const handleProcess = async () => {
+    setStep('loading')
+    setFfProgress(0)
+    setFfError(null)
+    try {
+      const end  = trimEnd > trimStart ? trimEnd : duration
+      const blob = await processVideo(
+        videoSrc, trimStart, end, cropPixels,
+        setFfProgress,
+        () => setStep('processing'),
+      )
+      onConfirm(blob)
+    } catch (err) {
+      setFfError('Erreur FFmpeg. Vérifie ta connexion ou essaie une vidéo plus courte.')
+      setStep('trim')
+    }
+  }
+
+  if (step === 'crop' && frameUrl) {
+    return (
+      <CropModal
+        imageSrc={frameUrl}
+        onCropCoords={handleCropCoords}
+        onCancel={() => { setFrameUrl(null); setStep('trim') }}
+      />
+    )
+  }
+
+  return (
+    <div className="fixed inset-0 z-[300] bg-black flex flex-col">
+      {/* Player vidéo */}
+      <div className="relative flex-1 flex items-center justify-center overflow-hidden">
+        <video
+          ref={videoRef}
+          src={videoSrc}
+          controls
+          className="max-h-full max-w-full"
+          onLoadedMetadata={handleLoaded}
+        />
+        {cropPixels && (
+          <div className="absolute top-3 right-3 bg-white/20 text-white text-[10px] uppercase tracking-widest px-2 py-1">
+            CADRÉ
+          </div>
+        )}
+      </div>
+
+      <div className="bg-black px-6 py-4 flex flex-col gap-4">
+        {/* Trim start */}
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-white/40 uppercase tracking-widest shrink-0 w-16">DÉBUT</span>
+          <input
+            type="range" min={0} max={duration} step={0.01}
+            value={trimStart}
+            onChange={e => {
+              const v = Number(e.target.value)
+              setTrimStart(v)
+              if (v >= trimEnd) setTrimEnd(Math.min(v + 0.5, duration))
+              if (videoRef.current) videoRef.current.currentTime = v
+            }}
+            className="flex-1 accent-white"
+          />
+          <span className="text-xs text-white/40 tabular-nums w-10 text-right">{formatTime(trimStart)}</span>
+        </div>
+
+        {/* Trim end */}
+        <div className="flex items-center gap-4">
+          <span className="text-xs text-white/40 uppercase tracking-widest shrink-0 w-16">FIN</span>
+          <input
+            type="range" min={0} max={duration} step={0.01}
+            value={trimEnd}
+            onChange={e => {
+              const v = Number(e.target.value)
+              setTrimEnd(v)
+              if (v <= trimStart) setTrimStart(Math.max(v - 0.5, 0))
+              if (videoRef.current) videoRef.current.currentTime = v
+            }}
+            className="flex-1 accent-white"
+          />
+          <span className="text-xs text-white/40 tabular-nums w-10 text-right">{formatTime(trimEnd)}</span>
+        </div>
+
+        {/* Durée sélectionnée */}
+        <div className="text-xs text-white/20 text-center tabular-nums">
+          {formatTime(Math.max(0, trimEnd - trimStart))} sélectionné
+        </div>
+
+        {/* Progression FFmpeg */}
+        {(step === 'loading' || step === 'processing') && (
+          <div className="flex flex-col gap-2">
+            {step === 'processing' && (
+              <div className="w-full h-0.5 bg-white/10 rounded-full overflow-hidden">
+                <div className="h-full bg-white transition-all duration-300" style={{ width: `${ffProgress}%` }} />
+              </div>
+            )}
+            <span className="text-xs text-white/40 text-center uppercase tracking-widest">
+              {step === 'loading'
+                ? 'CHARGEMENT FFMPEG...'
+                : `TRAITEMENT ${ffProgress} %`}
+            </span>
+          </div>
+        )}
+
+        {ffError && (
+          <span className="text-xs text-red-400 uppercase tracking-wide text-center">{ffError}</span>
+        )}
+
+        {/* Actions */}
+        <div className="flex items-center justify-between pt-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs uppercase tracking-widest text-white/40 hover:text-white transition-colors duration-150"
+          >
+            CANCEL
+          </button>
+
+          <div className="flex items-center gap-6">
+            <button
+              type="button"
+              onClick={extractFrame}
+              disabled={step === 'loading' || step === 'processing'}
+              className="text-xs uppercase tracking-widest text-white/40 hover:text-white transition-colors duration-150 disabled:opacity-30"
+            >
+              {cropPixels ? 'RE-CADRER' : 'CADRER'}
+            </button>
+            <button
+              type="button"
+              onClick={handleProcess}
+              disabled={step === 'loading' || step === 'processing' || trimEnd <= trimStart}
+              className="text-xs uppercase tracking-widest text-white hover:opacity-60 transition-opacity duration-150 disabled:opacity-30"
+            >
+              {step === 'loading' ? 'CHARGEMENT...' : step === 'processing' ? 'TRAITEMENT...' : 'CONFIRMER'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -471,7 +705,13 @@ function SortableSlot({ slot, index, onFileSelect }) {
           onClick={() => fileRef.current.click()}
           className="aspect-[3/4] bg-black relative overflow-hidden group w-full block"
         >
-          {slot.url ? (
+          {slot.url && slot.type === 'video' ? (
+            <video
+              src={slot.url}
+              muted
+              className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150"
+            />
+          ) : slot.url ? (
             <img
               src={slot.url}
               alt={`Slot ${index + 1}`}
@@ -510,12 +750,14 @@ function SortableSlot({ slot, index, onFileSelect }) {
         <input
           ref={fileRef}
           type="file"
-          accept="image/*"
+          accept="image/*,video/*"
           className="hidden"
           onChange={e => { if (e.target.files[0]) onFileSelect(slot.id, e.target.files[0]); e.target.value = '' }}
         />
       </div>
-      <span className="text-xs text-muted text-center">{index === 0 ? 'MAIN' : `VAR. ${index}`}</span>
+      <span className="text-xs text-muted text-center">
+        {index === 0 ? 'MAIN' : `VAR. ${index}`}{slot.type === 'video' ? ' · VID' : ''}
+      </span>
     </div>
   )
 }
@@ -534,10 +776,11 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
     date:     initial?.date     ?? String(new Date().getFullYear()),
   })
 
-  // Slots : tableau ordonné de { id, blob, url }
+  // Slots : tableau ordonné de { id, blob, url, type: 'image'|'video' }
   const [slots, setSlots] = useState(() => {
-    const urls = initial?.images ?? ['', '', '', '']
-    return urls.map((url, i) => ({ id: `slot-${i}`, blob: null, url }))
+    const urls   = initial?.images     ?? ['', '', '', '']
+    const types  = initial?.mediaTypes ?? urls.map(() => 'image')
+    return urls.map((url, i) => ({ id: `slot-${i}`, blob: null, url, type: types[i] ?? 'image' }))
   })
 
   // Miniature séparée pour la home page
@@ -546,14 +789,20 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
   const thumbInputRef                   = useRef()
 
   // Crop modal : null | { target: 'slot', id, src } | { target: 'thumb', src }
-  const [cropModal, setCropModal] = useState(null)
+  const [cropModal,  setCropModal]  = useState(null)
+  // Video modal : null | { slotId, src }
+  const [videoModal, setVideoModal] = useState(null)
 
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   // ── Handlers image slots ───────────────────────────────────────────────────
   const handleSlotFileSelect = (slotId, file) => {
     if (!file) return
-    setCropModal({ target: 'slot', id: slotId, src: URL.createObjectURL(file) })
+    if (file.type.startsWith('video/')) {
+      setVideoModal({ slotId, src: URL.createObjectURL(file) })
+    } else {
+      setCropModal({ target: 'slot', id: slotId, src: URL.createObjectURL(file) })
+    }
   }
 
   // ── Handlers thumbnail ─────────────────────────────────────────────────────
@@ -570,7 +819,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
     if (target === 'slot') {
       const { id } = cropModal
       setSlots(prev => prev.map(s =>
-        s.id === id ? { ...s, blob, url: URL.createObjectURL(blob) } : s
+        s.id === id ? { ...s, blob, url: URL.createObjectURL(blob), type: 'image' } : s
       ))
     } else {
       if (thumbUrl.startsWith('blob:')) URL.revokeObjectURL(thumbUrl)
@@ -579,6 +828,16 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
     }
 
     setCropModal(null)
+  }
+
+  // ── Handlers vidéo ─────────────────────────────────────────────────────────
+  const handleVideoConfirm = (blob) => {
+    const { slotId, src } = videoModal
+    URL.revokeObjectURL(src)
+    setSlots(prev => prev.map(s =>
+      s.id === slotId ? { ...s, blob, url: URL.createObjectURL(blob), type: 'video' } : s
+    ))
+    setVideoModal(null)
   }
 
   // ── Drag-and-drop images ───────────────────────────────────────────────────
@@ -595,6 +854,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
     await onSave({
       form,
       blobs:         slots.map(s => s.blob),
+      blobTypes:     slots.map(s => s.type),
       existingUrls:  slots.map(s => s.blob ? '' : s.url),
       thumbBlob,
       existingThumb: initial?.thumbnail ?? '',
@@ -609,6 +869,14 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
           onConfirm={handleCropConfirm}
           onCancel={() => { URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
           lockedAspect={cropModal.target === 'thumb' ? 3 / 4 : undefined}
+        />
+      )}
+
+      {videoModal && (
+        <VideoEditModal
+          videoSrc={videoModal.src}
+          onConfirm={handleVideoConfirm}
+          onCancel={() => { URL.revokeObjectURL(videoModal.src); setVideoModal(null) }}
         />
       )}
 
@@ -801,11 +1069,11 @@ export default function Admin() {
     reorderProjects(reordered)
   }
 
-  const handleAdd = async ({ form, blobs, thumbBlob }) => {
+  const handleAdd = async ({ form, blobs, blobTypes, thumbBlob }) => {
     setIsSaving(true)
     setSaveError(null)
     try {
-      const newProject = await addProject(form, blobs, thumbBlob)
+      const newProject = await addProject(form, blobs, blobTypes, thumbBlob)
       setProjects(prev => [...prev, newProject])
       setView('list')
     } catch {
@@ -815,15 +1083,15 @@ export default function Admin() {
     }
   }
 
-  const handleEdit = async ({ form, blobs, existingUrls, thumbBlob, existingThumb }) => {
+  const handleEdit = async ({ form, blobs, blobTypes, existingUrls, thumbBlob, existingThumb }) => {
     setIsSaving(true)
     setSaveError(null)
     try {
-      const { images: finalUrls, thumbnail } = await updateProject(
-        editing.id, form, blobs, existingUrls, thumbBlob, existingThumb
+      const { images: finalUrls, mediaTypes: finalTypes, thumbnail } = await updateProject(
+        editing.id, form, blobs, blobTypes, existingUrls, thumbBlob, existingThumb
       )
       setProjects(prev => prev.map(p =>
-        p.id === editing.id ? { ...p, ...form, images: finalUrls, thumbnail } : p
+        p.id === editing.id ? { ...p, ...form, images: finalUrls, mediaTypes: finalTypes, thumbnail } : p
       ))
       setView('list')
       setEditing(null)

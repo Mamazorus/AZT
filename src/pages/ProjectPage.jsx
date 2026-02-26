@@ -1,42 +1,33 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { useParams, useNavigate } from 'react-router-dom'
+import { useProjectsContext } from '../context/ProjectsContext'
 
-export default function Modal({ project, isOpen, onClose }) {
+export default function ProjectPage() {
+  const { id }                = useParams()
+  const navigate              = useNavigate()
+  const { projects, loading } = useProjectsContext()
+
+  const project = projects.find(p => String(p.id) === id)
+
   const [currentVariant, setCurrentVariant] = useState(0)
   const [panelW, setPanelW]               = useState(null)
   const touchStartX                        = useRef(null)
+  const videoRefs                          = useRef([])
+  const soundHintTimer                     = useRef(null)
 
-  // Garde le dernier projet valide pour que l'animation de fermeture affiche encore le contenu
-  const [displayedProject, setDisplayedProject] = useState(null)
+  const [isMuted,       setIsMuted]       = useState(true)
+  const [showSoundHint, setShowSoundHint] = useState(false)
+
+  // Animation d'ouverture / fermeture (slide depuis le bas)
+  const [isVisible, setIsVisible] = useState(false)
   useEffect(() => {
-    if (project) {
-      setDisplayedProject(project)
-      return
-    }
-    // Efface après l'animation de fermeture pour éviter le flash sur le prochain projet
-    const timer = setTimeout(() => setDisplayedProject(null), 500)
-    return () => clearTimeout(timer)
-  }, [project])
+    const raf = requestAnimationFrame(() => setIsVisible(true))
+    return () => cancelAnimationFrame(raf)
+  }, [])
 
-  // Réinitialisation synchrone quand le projet change
-  const [lastProjectId, setLastProjectId] = useState(null)
-  if ((project?.id ?? null) !== lastProjectId) {
-    setLastProjectId(project?.id ?? null)
-    if (project) {
-      setCurrentVariant(0)
-      setPanelW(null)
-    }
-  }
-
-  // Utilise le projet courant directement pour éviter le flash ;
-  // repli sur displayedProject uniquement pour l'animation de fermeture (project === null)
-  const p      = project || displayedProject
-  const images = p?.images?.filter(Boolean) ?? []
-  const n      = images.length
-
-  // L'overlay reste actif tant que l'image du projet courant n'est pas chargée.
-  // La comparaison est instantanée au rendu — pas de useEffect, zéro flash.
-  const [loadedProjectId, setLoadedProjectId] = useState(null)
-  const imageLoading = p?.id !== loadedProjectId
+  const images     = project?.images?.filter(Boolean) ?? []
+  const mediaTypes = project?.mediaTypes ?? images.map(() => 'image')
+  const n          = images.length
 
   // Détecte les dimensions naturelles de la première image pour adapter le panel (desktop)
   useEffect(() => {
@@ -50,12 +41,22 @@ export default function Modal({ project, isOpen, onClose }) {
   }, [images[0]]) // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleClose = useCallback(() => {
-    setCurrentVariant(0)
-    onClose()
-  }, [onClose])
+    setIsVisible(false)
+    setTimeout(() => navigate('/'), 500)
+  }, [navigate])
 
   const prev = useCallback(() => setCurrentVariant(v => Math.max(v - 1, 0)), [])
   const next = useCallback(() => setCurrentVariant(v => Math.min(v + 1, n - 1)), [n])
+
+  const toggleMute = useCallback(() => {
+    // Manipuler directement le DOM — nécessaire pour respecter le geste utilisateur
+    videoRefs.current.forEach(v => { if (v) v.muted = !v.muted })
+    const first = videoRefs.current.find(v => v)
+    setIsMuted(first ? first.muted : true)
+    setShowSoundHint(true)
+    clearTimeout(soundHintTimer.current)
+    soundHintTimer.current = setTimeout(() => setShowSoundHint(false), 1200)
+  }, [])
 
   const handleTouchStart = useCallback((e) => {
     touchStartX.current = e.touches[0].clientX
@@ -76,15 +77,14 @@ export default function Modal({ project, isOpen, onClose }) {
   }, [handleClose, next, prev])
 
   useEffect(() => {
-    if (isOpen) {
-      document.addEventListener('keydown', handleKeyDown)
-      document.body.style.overflow = 'hidden'
-    }
+    document.addEventListener('keydown', handleKeyDown)
+    document.body.style.overflow = 'hidden'
     return () => {
       document.removeEventListener('keydown', handleKeyDown)
       document.body.style.overflow = ''
     }
-  }, [isOpen, handleKeyDown])
+  }, [handleKeyDown])
+
 
   // Largeur desktop = aspect * 100vh, max 75vw
   const cssVar = panelW
@@ -92,13 +92,12 @@ export default function Modal({ project, isOpen, onClose }) {
     : 'min(75vh, 55vw)'
 
   return (
-    // Toujours dans le DOM — pointer-events-none quand fermé pour l'animation slide-down
-    <div className={`fixed inset-0 z-[200] ${isOpen ? '' : 'pointer-events-none'}`}>
+    <div className={`fixed inset-0 z-[200] ${isVisible ? '' : 'pointer-events-none'}`}>
 
       {/* Backdrop */}
       <div
         className={`absolute inset-0 bg-black/25 backdrop-blur-sm transition-opacity duration-500 ${
-          isOpen ? 'opacity-100' : 'opacity-0'
+          isVisible ? 'opacity-100' : 'opacity-0'
         }`}
         onClick={handleClose}
       />
@@ -106,15 +105,21 @@ export default function Modal({ project, isOpen, onClose }) {
       {/* Contenu — slide depuis le bas */}
       <div
         className={`absolute inset-0 flex flex-col md:flex-row bg-white transition-transform duration-500 ease-[cubic-bezier(0.32,0.72,0,1)] ${
-          isOpen ? 'translate-y-0' : 'translate-y-full'
+          isVisible ? 'translate-y-0' : 'translate-y-full'
         }`}
       >
-        {p && (
+        {(loading || !project) ? (
+          <div className="flex-1 flex items-center justify-center">
+            <span className="text-sm text-muted uppercase tracking-wide">
+              {loading ? 'LOADING' : 'PROJET INTROUVABLE'}
+            </span>
+          </div>
+        ) : (
           <>
             {/* ─── Barre supérieure mobile — client + CLOSE ─────────────
                 Positionnée AVANT le panel image pour apparaître en haut  */}
             <div className="md:hidden flex-shrink-0 flex items-center justify-between px-4 py-3 border-b border-gray-100">
-              <span className="text-xs text-muted uppercase tracking-widest">{p.client}</span>
+              <span className="text-xs text-muted uppercase tracking-widest">{project.client}</span>
               <button
                 onClick={handleClose}
                 className="text-xs font-medium uppercase tracking-wide p-2 -m-2 transition-opacity duration-150 hover:opacity-60"
@@ -124,15 +129,12 @@ export default function Modal({ project, isOpen, onClose }) {
             </div>
 
             {/* ─── Panel image ──────────────────────────────────────────
-                Mobile  : fond blanc (pas de barres noires), flex-1 = max de hauteur
-                Desktop : fond noir, largeur adaptée à l'image              */}
+                Mobile  : fond blanc, flex-1 = max de hauteur
+                Desktop : fond noir, largeur adaptée à l'image          */}
             <div
               style={{ '--pw': cssVar }}
               className="relative flex-1 md:flex-none md:w-[var(--pw)] md:h-full overflow-hidden bg-white md:bg-black"
             >
-              {/* Overlay de chargement — apparaît instantanément, disparaît en fondu */}
-              <div className={`absolute inset-0 z-10 bg-white md:bg-black pointer-events-none ${imageLoading ? 'opacity-100' : 'opacity-0 transition-opacity duration-300'}`} />
-
               {/* Slider d'images — swipe gauche/droite */}
               {n > 0 && (
                 <div
@@ -148,14 +150,42 @@ export default function Modal({ project, isOpen, onClose }) {
                     <div
                       key={i}
                       style={{ width: `${100 / n}%` }}
-                      className="h-full flex-shrink-0 flex items-center justify-center"
+                      className="h-full flex-shrink-0 flex items-center justify-center relative"
                     >
-                      <img
-                        src={img}
-                        alt={`${p.client} ${i + 1}`}
-                        className="max-h-full max-w-full object-contain"
-                        onLoad={i === 0 ? () => setLoadedProjectId(p?.id) : undefined}
-                      />
+                      {mediaTypes[i] === 'video' ? (
+                        <>
+                          <video
+                            ref={el => { videoRefs.current[i] = el }}
+                            src={img}
+                            autoPlay muted loop playsInline
+                            className="max-h-full max-w-full object-contain cursor-pointer"
+                            onClick={toggleMute}
+                          />
+                          <div
+                            className={`absolute inset-0 flex items-center justify-center pointer-events-none transition-opacity duration-300 ${
+                              showSoundHint ? 'opacity-100' : 'opacity-0'
+                            }`}
+                          >
+                            <div className="bg-black/50 rounded-full p-3">
+                              {isMuted ? (
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                                  <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.52-1.42.93-2.25 1.18v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                                </svg>
+                              ) : (
+                                <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+                                  <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                                </svg>
+                              )}
+                            </div>
+                          </div>
+                        </>
+                      ) : (
+                        <img
+                          src={img}
+                          alt={`${project.client} ${i + 1}`}
+                          className="max-h-full max-w-full object-contain"
+                        />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -181,7 +211,7 @@ export default function Modal({ project, isOpen, onClose }) {
 
             {/* ─── Panel info ───────────────────────────────────────────
                 Mobile  : bande compacte en bas — client + CLOSE + 4 miniatures
-                Desktop : panneau latéral complet                          */}
+                Desktop : panneau latéral complet                        */}
             <div className="flex-shrink-0 md:flex-1 flex flex-col bg-white min-w-0 md:overflow-y-auto">
 
               {/* Header — desktop uniquement (mobile = barre en haut) */}
@@ -189,15 +219,15 @@ export default function Modal({ project, isOpen, onClose }) {
                 <div className="flex gap-8">
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted uppercase tracking-wider">CLIENT</span>
-                    <span className="text-sm font-medium uppercase tracking-wide">{p.client}</span>
+                    <span className="text-sm font-medium uppercase tracking-wide">{project.client}</span>
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted uppercase tracking-wider">LOGICIEL</span>
-                    <span className="text-sm font-medium uppercase tracking-wide">{p.software}</span>
+                    <span className="text-sm font-medium uppercase tracking-wide">{project.software}</span>
                   </div>
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted uppercase tracking-wider">DATE</span>
-                    <span className="text-sm font-medium uppercase tracking-wide">{p.date}</span>
+                    <span className="text-sm font-medium uppercase tracking-wide">{project.date}</span>
                   </div>
                 </div>
                 <button
@@ -210,7 +240,7 @@ export default function Modal({ project, isOpen, onClose }) {
 
               {/* Grille variantes
                   Mobile  : 4 colonnes, 1 ligne (bande horizontale)
-                  Desktop : 2 colonnes, 2 lignes                        */}
+                  Desktop : 2 colonnes, 2 lignes                      */}
               <div className="flex-1 grid grid-cols-4 md:grid-cols-2 gap-1 md:gap-0 px-2 pb-2 md:p-4">
                 {images.map((img, index) => (
                   <div
@@ -218,11 +248,19 @@ export default function Modal({ project, isOpen, onClose }) {
                     onClick={() => setCurrentVariant(index)}
                     className="group aspect-square cursor-pointer relative overflow-hidden bg-neutral-100"
                   >
-                    <img
-                      src={img}
-                      alt={`Variant ${index + 1}`}
-                      className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.05]"
-                    />
+                    {mediaTypes[index] === 'video' ? (
+                        <video
+                          src={img}
+                          muted
+                          className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.05]"
+                        />
+                      ) : (
+                        <img
+                          src={img}
+                          alt={`Variant ${index + 1}`}
+                          className="w-full h-full object-cover transition-transform duration-500 ease-out group-hover:scale-[1.05]"
+                        />
+                      )}
                     <div
                       className={`absolute inset-0 bg-black transition-opacity duration-200 ${
                         currentVariant === index ? 'opacity-0' : 'opacity-40 group-hover:opacity-10'
