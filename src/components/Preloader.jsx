@@ -10,7 +10,7 @@ export default function Preloader({ onComplete }) {
     setProgress(100)
     setTimeout(() => {
       setFading(true)
-      setTimeout(onComplete, 700)
+      onComplete()
     }, 200)
   }, [onComplete])
 
@@ -46,7 +46,7 @@ export default function Preloader({ onComplete }) {
       className="fixed inset-0 z-[500] bg-black flex items-center justify-center overflow-hidden"
       style={{
         transform:     fading ? 'translateY(100%)' : 'translateY(0)',
-        transition:    fading ? 'transform 0.7s cubic-bezier(0.32,0.72,0,1)' : 'none',
+        transition:    fading ? 'transform 1.1s cubic-bezier(0.76,0,0.24,1)' : 'none',
         pointerEvents: fading ? 'none' : 'auto',
       }}
     >
@@ -56,7 +56,7 @@ export default function Preloader({ onComplete }) {
         alt="Logo"
         className="w-[55vw] max-w-lg select-none"
         style={{
-          transform:  `scale(${(0.15 + (progress / 100) * 0.85).toFixed(3)}) rotate(${(10 - progress * 0.1).toFixed(1)}deg)`,
+          transform:  `scale(${(0.15 + (progress / 100) * 0.35).toFixed(3)}) rotate(${(10 - progress * 0.1).toFixed(1)}deg)`,
           transition: 'transform 0.12s ease-out',
         }}
         draggable={false}

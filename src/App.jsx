@@ -10,13 +10,19 @@ import ProjectPage from './pages/ProjectPage'
 import { ProjectsProvider } from './context/ProjectsContext'
 
 export default function App() {
-  const [ready, setReady] = useState(false)
+  const [siteReady,      setSiteReady]      = useState(false)
+  const [showPreloader,  setShowPreloader]  = useState(true)
+
+  const handleComplete = () => {
+    setTimeout(() => setSiteReady(true), 450)
+    setTimeout(() => setShowPreloader(false), 1200)
+  }
 
   return (
     <ProjectsProvider>
-      {!ready && <Preloader onComplete={() => setReady(true)} />}
+      {showPreloader && <Preloader onComplete={handleComplete} />}
 
-      <div className={`min-h-screen flex flex-col ${ready ? 'site-ready' : 'opacity-0 pointer-events-none'}`}>
+      <div className={`min-h-screen flex flex-col ${siteReady ? 'site-ready' : 'opacity-0 pointer-events-none'}`}>
         <Routes>
           {/* Admin — page standalone sans Header/Footer */}
           <Route path="/admin" element={<Admin />} />
