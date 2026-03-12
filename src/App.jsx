@@ -7,7 +7,10 @@ import Home from './pages/Home'
 import About from './pages/About'
 import Admin from './pages/Admin'
 import ProjectPage from './pages/ProjectPage'
+import Web from './pages/Web'
+import WebProjectPage from './pages/WebProjectPage'
 import { ProjectsProvider } from './context/ProjectsContext'
+import { WebProjectsProvider } from './context/WebProjectsContext'
 
 export default function App() {
   const [siteReady,      setSiteReady]      = useState(false)
@@ -20,6 +23,7 @@ export default function App() {
 
   return (
     <ProjectsProvider>
+    <WebProjectsProvider>
       {showPreloader && <Preloader onComplete={handleComplete} />}
 
       <div className={`min-h-screen flex flex-col ${siteReady ? 'site-ready' : 'opacity-0 pointer-events-none'}`}>
@@ -35,6 +39,8 @@ export default function App() {
                 <Route path="/" element={<Home />}>
                   <Route path="project/:id" element={<ProjectPage />} />
                 </Route>
+                <Route path="/web" element={<Web />} />
+                <Route path="/web/:id" element={<WebProjectPage />} />
                 <Route path="/about" element={<About />} />
               </Routes>
               <Footer />
@@ -42,6 +48,7 @@ export default function App() {
           } />
         </Routes>
       </div>
+    </WebProjectsProvider>
     </ProjectsProvider>
   )
 }

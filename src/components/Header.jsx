@@ -9,8 +9,11 @@ function formatTime() {
 }
 
 export default function Header() {
-  const [datetime, setDatetime] = useState(formatTime) // lazy init : heure correcte dès le 1er rendu
+  const [datetime, setDatetime] = useState(formatTime)
   const location = useLocation()
+
+  const isWeb = location.pathname.startsWith('/web')
+  const isAbout = location.pathname === '/about'
 
   useEffect(() => {
     const interval = setInterval(() => setDatetime(formatTime()), 1000)
@@ -18,35 +21,54 @@ export default function Header() {
   }, [])
 
   return (
-    <header className="fixed top-0 left-0 right-0 h-[60px] px-6 flex items-center justify-between bg-white z-[100]">
-      {/* Logo */}
-      <Link to="/" className="flex items-center" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
+    <header className={`fixed top-0 left-0 right-0 h-[60px] px-6 flex items-center justify-between z-[100] transition-colors duration-300 ${
+      isWeb ? 'bg-black text-white' : 'bg-white text-black'
+    }`}>
+      {/* Logo - hidden on mobile */}
+      <Link to="/" className="invisible pointer-events-none md:visible md:pointer-events-auto flex items-center" onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}>
         <img
           src="/logo.svg"
           alt="Logo"
           className="transition-opacity duration-150 hover:opacity-75"
-          style={{ height: '30px', filter: 'invert(1)' }}
+          style={{ height: '30px', filter: isWeb ? 'none' : 'invert(1)' }}
           draggable={false}
         />
       </Link>
 
       {/* Center text - hidden on mobile */}
-      <span className="absolute left-1/2 -translate-x-1/2 text-sm font-normal tracking-wide hidden md:block">
+      <span className={`absolute left-1/2 -translate-x-1/2 text-sm font-normal tracking-wide hidden md:block ${isWeb ? 'text-white/40' : ''}`}>
         @2026 ALL WORKS
       </span>
 
       {/* Right side */}
       <div className="flex items-center gap-4 md:gap-6">
+        {isAbout ? (
+          <>
+            <Link to="/" className="text-sm font-normal tracking-wide uppercase transition-opacity duration-150 hover:opacity-60">
+              GRAPHIC
+            </Link>
+            <Link to="/web" className="text-sm font-normal tracking-wide uppercase transition-opacity duration-150 hover:opacity-60">
+              WEB
+            </Link>
+          </>
+        ) : (
+          <>
+            <Link
+              to={isWeb ? '/' : '/web'}
+              className="text-sm font-normal tracking-wide uppercase transition-opacity duration-150 hover:opacity-60"
+            >
+              {isWeb ? 'GRAPHIC' : 'WEB'}
+            </Link>
+            <Link
+              to="/about"
+              className="text-sm font-normal tracking-wide uppercase transition-opacity duration-150 hover:opacity-60"
+            >
+              ABOUT
+            </Link>
+          </>
+        )}
         <Link
-          to="/about"
-          className={`text-sm font-normal tracking-wide uppercase transition-opacity duration-150 hover:opacity-60 ${
-            location.pathname === '/about' ? 'opacity-60' : ''
-          }`}
-        >
-          ABOUT
-        </Link>
-        <Link
-          to="/admin"
+          to={isWeb ? '/admin?tab=web' : '/admin'}
           title="Admin"
           className={`transition-opacity duration-150 hover:opacity-60 ${
             location.pathname === '/admin' ? 'opacity-60' : 'opacity-30'

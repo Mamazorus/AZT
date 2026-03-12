@@ -31,6 +31,10 @@ body {
   line-height: 1.4;
 }
 
+body:has([data-web]) {
+  background: #000;
+}
+
 /* ═══════════════════════════════════════════════════════════════
    CUSTOM UTILITIES
    ═══════════════════════════════════════════════════════════════ */
@@ -77,6 +81,21 @@ body {
   .group:hover .variant-overlay {
     @apply opacity-0;
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   GRID HOVER — dim others on card hover
+   ═══════════════════════════════════════════════════════════════ */
+[data-grid] [data-card] img {
+  transition: filter 0.4s ease;
+}
+
+[data-grid]:has([data-card]:hover) [data-card] img {
+  filter: brightness(0.6);
+}
+
+[data-grid]:has([data-card]:hover) [data-card]:hover img {
+  filter: brightness(1);
 }
 
 /* ═══════════════════════════════════════════════════════════════

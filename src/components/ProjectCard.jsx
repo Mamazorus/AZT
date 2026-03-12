@@ -1,26 +1,33 @@
 export default function ProjectCard({ project, onClick, style }) {
   return (
-    <article data-card style={style} className="cursor-pointer group" onClick={() => onClick(project)}>
-
-      <div className="relative overflow-hidden">
+    <article
+      data-card
+      style={style}
+      className="cursor-pointer relative group/card"
+      onClick={() => onClick(project)}
+    >
+      <div className="relative aspect-[4/5] bg-white flex items-center justify-center overflow-hidden">
         <img
           src={project.thumbnail || project.images[0]}
           alt={project.client}
-          className="w-full aspect-[3/4] object-cover bg-black transition-transform duration-500 ease-out group-hover:scale-[1.05]"
+          className="w-full h-full object-contain"
           loading="lazy"
         />
-        {/* Client name glisse du bas */}
-        <div className="absolute inset-x-0 bottom-0 px-3 pb-3 pt-8 bg-gradient-to-t from-black/55 to-transparent translate-y-full group-hover:translate-y-0 transition-transform duration-300 ease-out">
-          <span className="text-xs text-white/90 uppercase tracking-widest">
-            {project.client}
-          </span>
+        <div className="absolute bottom-0 left-0 right-0 flex justify-center pb-3 opacity-0 group-hover/card:opacity-100 transition-opacity duration-200">
+          <div className="bg-black/70 backdrop-blur-sm px-3 py-2 flex items-center gap-2">
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M7 17L17 7M17 7H7M17 7v10" />
+            </svg>
+            <span className="text-[10px] text-white uppercase tracking-widest whitespace-nowrap">
+              View project
+            </span>
+          </div>
         </div>
       </div>
 
-      <div className="pt-3 text-center text-sm font-normal text-muted transition-colors duration-200 group-hover:text-black">
-        {project.number}
+      <div className="pt-2 text-[10px] font-extralight uppercase tracking-widest text-black/60 text-center">
+        {project.client}
       </div>
-
     </article>
   )
 }

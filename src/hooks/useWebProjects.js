@@ -1,14 +1,14 @@
 import { useState, useEffect } from 'react'
-import { collection, onSnapshot, query } from 'firebase/firestore'
+import { collection, onSnapshot, query, orderBy } from 'firebase/firestore'
 import { db } from '../firebase'
-import { PROJECTS } from '../data/projects'
+import { WEB_PROJECTS } from '../data/webProjects'
 
-export function useProjects() {
+export function useWebProjects() {
   const [projects, setProjects] = useState([])
   const [loading, setLoading]   = useState(true)
 
   useEffect(() => {
-    const q = query(collection(db, 'projects'))
+    const q = query(collection(db, 'webProjects'))
     const unsub = onSnapshot(
       q,
       (snapshot) => {
@@ -23,12 +23,12 @@ export function useProjects() {
             })
           setProjects(sorted)
         } else {
-          setProjects(PROJECTS)
+          setProjects(WEB_PROJECTS)
         }
         setLoading(false)
       },
       () => {
-        setProjects(PROJECTS)
+        setProjects(WEB_PROJECTS)
         setLoading(false)
       }
     )

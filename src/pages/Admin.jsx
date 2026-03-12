@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import Cropper from 'react-easy-crop'
 import { signInWithEmailAndPassword, signOut, onAuthStateChanged } from 'firebase/auth'
 import {
@@ -100,6 +100,79 @@ async function reorderProjects(projects) {
   const batch = writeBatch(db)
   projects.forEach((p, i) => {
     batch.update(doc(db, 'projects', p.id), {
+      order:  i,
+      number: String(i + 1).padStart(2, '0'),
+    })
+  })
+  await withTimeout(batch.commit(), 10000)
+}
+
+// ─── Web project — Firebase helpers ──────────────────────────────────────────
+async function uploadWebBlob(blob, projectId, slot, isVideo = false) {
+  const ext     = isVideo ? 'mp4' : 'jpg'
+  const path    = `webProjects/${projectId}/slot-${slot}.${ext}`
+  const fileRef = ref(storage, path)
+  const task    = uploadBytesResumable(fileRef, blob)
+
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('Upload timeout')), 60000)
+    task.on(
+      'state_changed',
+      null,
+      (err) => { clearTimeout(timeout); reject(err) },
+      async () => { clearTimeout(timeout); resolve(await getDownloadURL(task.snapshot.ref)) }
+    )
+  })
+}
+
+async function getNextWebNumber() {
+  const snapshot = await withTimeout(getDocs(collection(db, 'webProjects')))
+  return { number: String(snapshot.size + 1).padStart(2, '0'), order: snapshot.size }
+}
+
+async function addWebProject(form, imageSlots) {
+  const { number, order } = await getNextWebNumber()
+  const tempId = `temp_web_${Date.now()}`
+
+  const images = []
+  for (let i = 0; i < imageSlots.length; i++) {
+    const s = imageSlots[i]
+    const isVid = s.blob instanceof File ? s.blob.type.startsWith('video/') : false
+    images.push(s.blob ? await uploadWebBlob(s.blob, tempId, `img-${i}`, isVid) : (s.url || ''))
+  }
+
+  const docRef = await withTimeout(
+    addDoc(collection(db, 'webProjects'), {
+      number, order, ...form, images, createdAt: serverTimestamp(),
+    })
+  )
+  return { id: docRef.id, number, order, ...form, images }
+}
+
+async function updateWebProject(id, form, imageSlots) {
+  const images = []
+  for (let i = 0; i < imageSlots.length; i++) {
+    const s = imageSlots[i]
+    const isVid = s.blob instanceof File ? s.blob.type.startsWith('video/') : false
+    images.push(s.blob ? await uploadWebBlob(s.blob, id, `img-${i}`, isVid) : (s.url || ''))
+  }
+
+  await withTimeout(updateDoc(doc(db, 'webProjects', id), { ...form, images }))
+  return { images }
+}
+
+async function deleteWebProject(project) {
+  await withTimeout(deleteDoc(doc(db, 'webProjects', project.id)))
+  for (const url of (project.images || [])) {
+    if (!url) continue
+    try { await deleteObject(ref(storage, url)) } catch {}
+  }
+}
+
+async function reorderWebProjects(projects) {
+  const batch = writeBatch(db)
+  projects.forEach((p, i) => {
+    batch.update(doc(db, 'webProjects', p.id), {
       order:  i,
       number: String(i + 1).padStart(2, '0'),
     })
@@ -221,15 +294,27 @@ const ASPECT_OPTIONS = [
   { label: 'CUSTOM', value: 'custom' },
 ]
 
+const WEB_ASPECT_OPTIONS = [
+  { label: '16:9',   value: 16 / 9 },
+  { label: 'CUSTOM', value: 'custom' },
+]
+
+const GRAPHIC_ASPECT_OPTIONS = [
+  { label: '4:5',    value: 4 / 5 },
+  { label: '9:16',   value: 9 / 16 },
+  { label: 'A3',     value: 297 / 420 },
+  { label: 'CUSTOM', value: 'custom' },
+]
+
 // onCropCoords : optionnel, utilisé pour le recadrage vidéo (retourne les coords, pas un blob)
-function CropModal({ imageSrc, onConfirm, onCancel, lockedAspect, onCropCoords }) {
+function CropModal({ imageSrc, onConfirm, onCancel, lockedAspect, onCropCoords, aspectOptions = ASPECT_OPTIONS }) {
   const [crop,              setCrop]              = useState({ x: 0, y: 0 })
   const [zoom,              setZoom]              = useState(1)
   const [rotation,          setRotation]          = useState(0)
-  const [aspect,            setAspect]            = useState(lockedAspect ?? 3 / 4)
+  const [aspect,            setAspect]            = useState(lockedAspect ?? aspectOptions[0].value)
   const [customW,           setCustomW]           = useState(4)
   const [customH,           setCustomH]           = useState(3)
-  const [cropperKey,        setCropperKey]        = useState(String(lockedAspect ?? 0.75))
+  const [cropperKey,        setCropperKey]        = useState(String(lockedAspect ?? aspectOptions[0].value))
   const [croppedAreaPixels, setCroppedAreaPixels] = useState(null)
   const [processing,        setProcessing]        = useState(false)
 
@@ -288,7 +373,7 @@ function CropModal({ imageSrc, onConfirm, onCancel, lockedAspect, onCropCoords }
           <div className="flex items-center gap-3 flex-wrap">
             <span className="text-xs text-white/40 uppercase tracking-widest shrink-0">FORMAT</span>
             <div className="flex gap-1">
-              {ASPECT_OPTIONS.map(opt => (
+              {aspectOptions.map(opt => (
                 <button
                   key={opt.label}
                   type="button"
@@ -591,7 +676,7 @@ function LoginGate() {
             onChange={e => setEmail(e.target.value)}
             required
             autoFocus
-            className="border-b border-black bg-transparent outline-none text-sm py-1 tracking-wide"
+            className="border-b border-white bg-transparent outline-none text-sm py-1 tracking-wide text-white"
           />
         </label>
 
@@ -602,7 +687,7 @@ function LoginGate() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
-            className="border-b border-black bg-transparent outline-none text-sm py-1 tracking-wide"
+            className="border-b border-white bg-transparent outline-none text-sm py-1 tracking-wide text-white"
           />
         </label>
 
@@ -623,7 +708,7 @@ function LoginGate() {
 }
 
 // ─── SortableRow ──────────────────────────────────────────────────────────────
-function SortableRow({ project, onEdit, onDelete }) {
+function SortableRow({ project, onEdit, onDelete, onToggle }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id })
 
   const style = {
@@ -635,7 +720,7 @@ function SortableRow({ project, onEdit, onDelete }) {
   }
 
   return (
-    <div ref={setNodeRef} style={style} className="flex items-center gap-3 py-4 border-b border-gray-100">
+    <div ref={setNodeRef} style={style} className={`flex items-center gap-3 py-4 border-b border-gray-100 ${project.hidden ? 'opacity-40' : ''}`}>
       {/* Poignée drag */}
       <button
         {...attributes}
@@ -653,11 +738,13 @@ function SortableRow({ project, onEdit, onDelete }) {
         </svg>
       </button>
 
-      <img
-        src={project.thumbnail || project.images[0]}
-        alt={project.client}
-        className="w-12 h-16 object-cover bg-black flex-shrink-0"
-      />
+      <div className="w-12 h-16 bg-white flex-shrink-0 flex items-center justify-center overflow-hidden">
+        <img
+          src={project.thumbnail || project.images[0]}
+          alt={project.client}
+          className="w-full h-full object-contain"
+        />
+      </div>
 
       <div className="flex-1 flex flex-col gap-0.5 min-w-0">
         <span className="text-sm uppercase tracking-wide truncate">{project.client}</span>
@@ -666,7 +753,25 @@ function SortableRow({ project, onEdit, onDelete }) {
         </span>
       </div>
 
-      <div className="flex gap-4 shrink-0">
+      <div className="flex gap-4 shrink-0 items-center">
+        <button
+          onClick={() => onToggle(project)}
+          title={project.hidden ? 'Afficher' : 'Masquer'}
+          className="text-muted hover:text-black transition-colors duration-150"
+        >
+          {project.hidden ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          )}
+        </button>
         <button
           onClick={() => onEdit(project)}
           className="text-xs uppercase tracking-widest text-muted hover:text-black transition-colors duration-150"
@@ -868,7 +973,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
           imageSrc={cropModal.src}
           onConfirm={handleCropConfirm}
           onCancel={() => { URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
-          lockedAspect={cropModal.target === 'thumb' ? 3 / 4 : undefined}
+          aspectOptions={GRAPHIC_ASPECT_OPTIONS}
         />
       )}
 
@@ -890,7 +995,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
               value={form.client}
               onChange={e => setForm(f => ({ ...f, client: e.target.value.toUpperCase() }))}
               required
-              className="border-b border-black bg-transparent outline-none text-sm uppercase tracking-wide py-1"
+              className="border-b border-white bg-transparent outline-none text-sm uppercase tracking-wide py-1 text-white mix-blend-difference"
             />
           </label>
 
@@ -900,7 +1005,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
               value={form.date}
               onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
               required
-              className="border-b border-black bg-transparent outline-none text-sm tracking-wide py-1"
+              className="border-b border-white bg-transparent outline-none text-sm tracking-wide py-1 text-white mix-blend-difference"
             />
           </label>
 
@@ -909,9 +1014,9 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
             <select
               value={form.category}
               onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-              className="border-b border-black bg-transparent outline-none text-sm uppercase tracking-wide py-1 cursor-pointer"
+              className="border-b border-white bg-transparent outline-none text-sm uppercase tracking-wide py-1 cursor-pointer text-white mix-blend-difference"
             >
-              {CATEGORY_OPTIONS.map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)}
+              {CATEGORY_OPTIONS.map(c => <option key={c} value={c} className="bg-white text-black">{c.toUpperCase()}</option>)}
             </select>
           </label>
 
@@ -920,9 +1025,9 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
             <select
               value={form.software}
               onChange={e => setForm(f => ({ ...f, software: e.target.value }))}
-              className="border-b border-black bg-transparent outline-none text-sm uppercase tracking-wide py-1 cursor-pointer"
+              className="border-b border-white bg-transparent outline-none text-sm uppercase tracking-wide py-1 cursor-pointer text-white mix-blend-difference"
             >
-              {SOFTWARE_OPTIONS.map(s => <option key={s} value={s}>{s}</option>)}
+              {SOFTWARE_OPTIONS.map(s => <option key={s} value={s} className="bg-white text-black">{s}</option>)}
             </select>
           </label>
         </div>
@@ -955,7 +1060,6 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
             </button>
             <p className="text-xs text-muted leading-relaxed pt-1">
               Image distincte affichée dans la grille de la home page.
-              <br />Format 3:4 forcé.
               {!thumbUrl && (
                 <span className="block mt-1 opacity-50">Si vide, l'image principale (slot 1) sera utilisée.</span>
               )}
@@ -998,7 +1102,389 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
           <button
             type="submit"
             disabled={isSaving}
-            className="text-xs uppercase tracking-widest hover:opacity-60 transition-opacity duration-150 disabled:opacity-30"
+            className="text-xs uppercase tracking-widest text-white mix-blend-difference hover:opacity-60 transition-opacity duration-150 disabled:opacity-30"
+          >
+            {isSaving ? 'SAVING...' : isEdit ? 'UPDATE PROJECT' : 'ADD PROJECT'}
+          </button>
+          <button
+            type="button"
+            onClick={onCancel}
+            className="text-xs uppercase tracking-widest text-muted hover:text-black transition-colors duration-150"
+          >
+            CANCEL
+          </button>
+        </div>
+      </form>
+    </>
+  )
+}
+
+// ─── SortableWebRow ───────────────────────────────────────────────────────────
+function SortableWebRow({ project, onEdit, onDelete, onToggle }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: project.id })
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity:  isDragging ? 0.4 : 1,
+    position: 'relative',
+    zIndex:   isDragging ? 10 : 'auto',
+  }
+
+  const media   = project.images?.[0]
+  const isVideo = media && /\.(mp4|webm|mov)/i.test(media)
+
+  return (
+    <div ref={setNodeRef} style={style} className={`flex items-center gap-4 py-4 border-b border-white/10 ${project.hidden ? 'opacity-40' : ''}`}>
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab active:cursor-grabbing text-white/30 hover:text-white/60 transition-colors duration-150 p-1 shrink-0 touch-none"
+        tabIndex={-1}
+      >
+        <svg width="12" height="16" viewBox="0 0 12 16" fill="currentColor">
+          <circle cx="3" cy="3"  r="1.5" />
+          <circle cx="9" cy="3"  r="1.5" />
+          <circle cx="3" cy="8"  r="1.5" />
+          <circle cx="9" cy="8"  r="1.5" />
+          <circle cx="3" cy="13" r="1.5" />
+          <circle cx="9" cy="13" r="1.5" />
+        </svg>
+      </button>
+
+      <div className="w-28 aspect-video bg-zinc-900 flex-shrink-0 relative overflow-hidden">
+        {media ? (
+          isVideo ? (
+            <video src={media} muted className="absolute inset-0 w-full h-full object-cover" />
+          ) : (
+            <img src={media} alt={project.client} className="absolute inset-0 w-full h-full object-cover" />
+          )
+        ) : null}
+      </div>
+
+      <div className="flex-1 flex flex-col gap-0.5 min-w-0">
+        <span className="text-sm text-white uppercase tracking-wide truncate">{project.client}</span>
+        <span className="text-xs text-white/40 uppercase tracking-wider">
+          {project.number} — {project.type} — {project.year}
+        </span>
+        {project.url && (
+          <span className="text-xs text-white/30 truncate">{project.url}</span>
+        )}
+      </div>
+
+      <div className="flex gap-4 shrink-0 items-center">
+        <button
+          onClick={() => onToggle(project)}
+          title={project.hidden ? 'Afficher' : 'Masquer'}
+          className="text-white/40 hover:text-white transition-colors duration-150"
+        >
+          {project.hidden ? (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+              <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+              <line x1="1" y1="1" x2="23" y2="23"/>
+            </svg>
+          ) : (
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+          )}
+        </button>
+        <button
+          onClick={() => onEdit(project)}
+          className="text-xs uppercase tracking-widest text-white/40 hover:text-white transition-colors duration-150"
+        >
+          EDIT
+        </button>
+        <button
+          onClick={() => onDelete(project.id)}
+          className="text-xs uppercase tracking-widest text-white/40 hover:text-red-400 transition-colors duration-150"
+        >
+          DELETE
+        </button>
+      </div>
+    </div>
+  )
+}
+
+// ─── WebImageSlot ─────────────────────────────────────────────────────────────
+function WebImageSlot({ slot, index, onFileSelect, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slot.id })
+  const fileRef = useRef()
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+    position: 'relative',
+    zIndex: isDragging ? 10 : 'auto',
+  }
+
+  const isVideo = slot.blob?.type?.startsWith('video/') || /\.(mp4|webm|mov)/i.test(slot.url)
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      <div className="relative group">
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="w-full aspect-video bg-black relative overflow-hidden block"
+        >
+          {isVideo ? (
+            <video src={slot.url} muted className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
+          ) : (
+            <img src={slot.url} alt={`Image ${index + 1}`} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
+          )}
+          <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            <span className="text-[10px] text-white uppercase tracking-wide">
+              MODIFIER{index === 0 ? ' · MINIATURE LISTING' : ''}
+            </span>
+          </div>
+        </button>
+
+        {/* Poignée drag */}
+        <button
+          type="button"
+          {...attributes}
+          {...listeners}
+          className="absolute top-2 left-2 cursor-grab active:cursor-grabbing text-white/50 hover:text-white p-1 touch-none transition-colors duration-150"
+          tabIndex={-1}
+        >
+          <svg width="10" height="14" viewBox="0 0 12 16" fill="currentColor">
+            <circle cx="3" cy="3"  r="1.5" />
+            <circle cx="9" cy="3"  r="1.5" />
+            <circle cx="3" cy="8"  r="1.5" />
+            <circle cx="9" cy="8"  r="1.5" />
+            <circle cx="3" cy="13" r="1.5" />
+            <circle cx="9" cy="13" r="1.5" />
+          </svg>
+        </button>
+
+        {/* Supprimer */}
+        <button
+          type="button"
+          onClick={() => onRemove(slot.id)}
+          className="absolute top-2 right-2 bg-black/60 text-white/60 hover:text-white w-6 h-6 flex items-center justify-center text-sm transition-colors duration-150"
+        >×</button>
+      </div>
+      <span className="text-xs text-muted mt-1 block">
+        {index === 0 ? 'MINIATURE LISTING' : `IMAGE ${index + 1}`}
+      </span>
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*,video/*"
+        className="hidden"
+        onChange={e => { if (e.target.files[0]) onFileSelect(slot.id, e.target.files[0]); e.target.value = '' }}
+      />
+    </div>
+  )
+}
+
+// ─── WebProjectForm ───────────────────────────────────────────────────────────
+const WEB_TYPE_OPTIONS = ['LANDING PAGE', 'E-COMMERCE', 'PORTFOLIO', 'DASHBOARD', 'MOBILE APP', 'BRANDING WEB', 'OTHER']
+
+function WebProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
+  const isEdit = !!initial
+
+  const [form, setForm] = useState({
+    client:      initial?.client      ?? '',
+    type:        initial?.type        ?? 'LANDING PAGE',
+    year:        initial?.year        ?? String(new Date().getFullYear()),
+    url:         initial?.url         ?? '',
+    summary:     initial?.summary     ?? '',
+    description: initial?.description ?? '',
+  })
+
+  // Images 16:9 dynamiques (listing + page projet) — uniquement les slots remplis
+  const [imageSlots, setImageSlots] = useState(() => {
+    const imgs = initial?.images?.filter(Boolean) ?? []
+    return imgs.map((url, i) => ({ id: `img-init-${i}`, blob: null, url }))
+  })
+
+  const [cropModal, setCropModal] = useState(null)
+  const webImgSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  // ── Handlers images ────────────────────────────────────────────────────────
+  const handleImageFileSelect = (slotId, file) => {
+    if (!file) return
+    if (file.type.startsWith('video/')) {
+      const url = URL.createObjectURL(file)
+      if (slotId === 'new') {
+        setImageSlots(prev => [...prev, { id: `img-${Date.now()}`, blob: file, url }])
+      } else {
+        setImageSlots(prev => prev.map(s => s.id === slotId ? { ...s, blob: file, url } : s))
+      }
+    } else {
+      setCropModal({ id: slotId, src: URL.createObjectURL(file) })
+    }
+  }
+
+  const removeImageSlot = (slotId) => {
+    setImageSlots(prev => prev.filter(s => s.id !== slotId))
+  }
+
+  const handleWebImgDragEnd = (event) => {
+    const { active, over } = event
+    if (over && active.id !== over.id) {
+      setImageSlots(prev => {
+        const oldIndex = prev.findIndex(s => s.id === active.id)
+        const newIndex = prev.findIndex(s => s.id === over.id)
+        return arrayMove(prev, oldIndex, newIndex)
+      })
+    }
+  }
+
+  // ── Crop confirm ───────────────────────────────────────────────────────────
+  const handleCropConfirm = (blob) => {
+    const { id, src } = cropModal
+    URL.revokeObjectURL(src)
+    if (id === 'new') {
+      setImageSlots(prev => [...prev, { id: `img-${Date.now()}`, blob, url: URL.createObjectURL(blob) }])
+    } else {
+      setImageSlots(prev => prev.map(s =>
+        s.id === id ? { ...s, blob, url: URL.createObjectURL(blob) } : s
+      ))
+    }
+    setCropModal(null)
+  }
+
+  // ── Submit ─────────────────────────────────────────────────────────────────
+  const handleSubmit = async (e) => {
+    e.preventDefault()
+    await onSave({ form, imageSlots })
+  }
+
+  return (
+    <>
+      {cropModal && (
+        <CropModal
+          imageSrc={cropModal.src}
+          onConfirm={handleCropConfirm}
+          onCancel={() => { URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
+          aspectOptions={WEB_ASPECT_OPTIONS}
+        />
+      )}
+
+      <form onSubmit={handleSubmit} className="flex flex-col gap-8">
+
+        {/* ── Champs texte ── */}
+        <div className="grid grid-cols-2 gap-6">
+          <label className="flex flex-col gap-2">
+            <span className="text-xs text-muted uppercase tracking-wider">CLIENT</span>
+            <input
+              value={form.client}
+              onChange={e => setForm(f => ({ ...f, client: e.target.value.toUpperCase() }))}
+              required
+              className="border-b border-white bg-transparent outline-none text-sm uppercase tracking-wide py-1 text-white"
+            />
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-xs text-muted uppercase tracking-wider">TYPE</span>
+            <select
+              value={form.type}
+              onChange={e => setForm(f => ({ ...f, type: e.target.value }))}
+              className="border-b border-white bg-transparent outline-none text-sm uppercase tracking-wide py-1 cursor-pointer text-white"
+            >
+              {WEB_TYPE_OPTIONS.map(t => <option key={t} value={t} className="bg-black text-white">{t}</option>)}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-xs text-muted uppercase tracking-wider">YEAR</span>
+            <input
+              value={form.year}
+              onChange={e => setForm(f => ({ ...f, year: e.target.value }))}
+              required
+              className="border-b border-white bg-transparent outline-none text-sm tracking-wide py-1 text-white"
+            />
+          </label>
+
+          <label className="flex flex-col gap-2">
+            <span className="text-xs text-muted uppercase tracking-wider">URL (OPTIONNEL)</span>
+            <input
+              value={form.url}
+              onChange={e => setForm(f => ({ ...f, url: e.target.value }))}
+              placeholder="https://..."
+              className="border-b border-white bg-transparent outline-none text-sm tracking-wide py-1 placeholder:text-muted text-white"
+            />
+          </label>
+
+          <label className="col-span-2 flex flex-col gap-2">
+            <span className="text-xs text-muted uppercase tracking-wider">RÉSUMÉ — PAGE LISTING (OPTIONNEL)</span>
+            <p className="text-xs text-muted opacity-50 -mt-1">Texte court affiché sur la page /web.</p>
+            <textarea
+              value={form.summary}
+              onChange={e => setForm(f => ({ ...f, summary: e.target.value }))}
+              rows={2}
+              className="border-b border-white bg-transparent outline-none text-sm tracking-wide py-1 resize-none text-white"
+            />
+          </label>
+
+          <label className="col-span-2 flex flex-col gap-2">
+            <span className="text-xs text-muted uppercase tracking-wider">DESCRIPTION — PAGE PROJET (OPTIONNEL)</span>
+            <p className="text-xs text-muted opacity-50 -mt-1">Texte long affiché dans la page projet.</p>
+            <textarea
+              value={form.description}
+              onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+              rows={3}
+              className="border-b border-white bg-transparent outline-none text-sm tracking-wide py-1 resize-none text-white"
+            />
+          </label>
+        </div>
+
+        {/* ── Images 16:9 ── */}
+        <div>
+          <span className="text-xs text-muted uppercase tracking-wider">IMAGES</span>
+          <p className="text-xs text-muted opacity-50 mt-1">La première est la miniature de la liste. Glisser pour réordonner.</p>
+          <div className="flex flex-col gap-3 mt-4">
+            <DndContext sensors={webImgSensors} collisionDetection={closestCenter} onDragEnd={handleWebImgDragEnd}>
+              <SortableContext items={imageSlots.map(s => s.id)} strategy={verticalListSortingStrategy}>
+                {imageSlots.map((slot, i) => (
+                  <WebImageSlot
+                    key={slot.id}
+                    slot={slot}
+                    index={i}
+                    onFileSelect={handleImageFileSelect}
+                    onRemove={removeImageSlot}
+                  />
+                ))}
+              </SortableContext>
+            </DndContext>
+
+            {/* Slot vide permanent pour ajouter */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => document.getElementById('img-input-new').click()}
+                className="w-full aspect-video bg-black/20 border border-dashed border-white/20 relative overflow-hidden group block hover:border-white/40 transition-colors duration-150"
+              >
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-xs text-muted uppercase tracking-widest group-hover:text-white transition-colors duration-150">+ AJOUTER UN MÉDIA</span>
+                </div>
+              </button>
+              <input
+                id="img-input-new"
+                type="file"
+                accept="image/*,video/*"
+                className="hidden"
+                onChange={e => { if (e.target.files[0]) handleImageFileSelect('new', e.target.files[0]); e.target.value = '' }}
+              />
+            </div>
+          </div>
+        </div>
+
+        {saveError && (
+          <p className="text-xs text-red-400 uppercase tracking-wide">{saveError}</p>
+        )}
+
+        <div className="flex gap-6 pt-2">
+          <button
+            type="submit"
+            disabled={isSaving}
+            className="text-xs uppercase tracking-widest text-white mix-blend-difference hover:opacity-60 transition-opacity duration-150 disabled:opacity-30"
           >
             {isSaving ? 'SAVING...' : isEdit ? 'UPDATE PROJECT' : 'ADD PROJECT'}
           </button>
@@ -1026,6 +1512,15 @@ export default function Admin() {
   const [saveError,     setSaveError]     = useState(null)
   const [deleteConfirm, setDeleteConfirm] = useState(null)
 
+  // ── États onglet WEB ───────────────────────────────────────────────────────
+  const [searchParams]                        = useSearchParams()
+  const [activeTab,       setActiveTab]       = useState(() => searchParams.get('tab') === 'web' ? 'web' : 'graphic')
+  const [webProjects,     setWebProjects]     = useState([])
+  const [webLoading,      setWebLoading]      = useState(false)
+  const [webView,         setWebView]         = useState('list')
+  const [webEditing,      setWebEditing]      = useState(null)
+  const [webDeleteConfirm, setWebDeleteConfirm] = useState(null)
+
   useEffect(() => {
     const unsub = onAuthStateChanged(auth, (u) => setUser(u ?? null))
     return unsub
@@ -1049,6 +1544,25 @@ export default function Admin() {
       .finally(() => setLoading(false))
   }, [user])
 
+  // Fetch des projets web depuis Firestore
+  useEffect(() => {
+    if (!user) return
+    setWebLoading(true)
+    getDocs(query(collection(db, 'webProjects')))
+      .then(snap => {
+        const sorted = snap.docs
+          .map(d => ({ id: d.id, ...d.data() }))
+          .sort((a, b) => {
+            const ao = a.order ?? (parseInt(a.number) - 1)
+            const bo = b.order ?? (parseInt(b.number) - 1)
+            return ao - bo
+          })
+        setWebProjects(sorted)
+      })
+      .catch(() => {})
+      .finally(() => setWebLoading(false))
+  }, [user])
+
   if (user === undefined) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-white">
@@ -1067,6 +1581,22 @@ export default function Admin() {
       .map((p, i) => ({ ...p, order: i, number: String(i + 1).padStart(2, '0') }))
     setProjects(reordered)
     reorderProjects(reordered)
+  }
+
+  const handleToggleVisibility = async (project) => {
+    const hidden = !project.hidden
+    try {
+      await updateDoc(doc(db, 'projects', project.id), { hidden })
+      setProjects(prev => prev.map(p => p.id === project.id ? { ...p, hidden } : p))
+    } catch {}
+  }
+
+  const handleWebToggleVisibility = async (project) => {
+    const hidden = !project.hidden
+    try {
+      await updateDoc(doc(db, 'webProjects', project.id), { hidden })
+      setWebProjects(prev => prev.map(p => p.id === project.id ? { ...p, hidden } : p))
+    } catch {}
   }
 
   const handleAdd = async ({ form, blobs, blobTypes, thumbBlob }) => {
@@ -1112,28 +1642,108 @@ export default function Admin() {
     setDeleteConfirm(null)
   }
 
+  // ── Handlers WEB ──────────────────────────────────────────────────────────
+  const handleWebDragEnd = ({ active, over }) => {
+    if (!over || active.id === over.id) return
+    const oldIndex  = webProjects.findIndex(p => p.id === active.id)
+    const newIndex  = webProjects.findIndex(p => p.id === over.id)
+    const reordered = arrayMove(webProjects, oldIndex, newIndex)
+      .map((p, i) => ({ ...p, order: i, number: String(i + 1).padStart(2, '0') }))
+    setWebProjects(reordered)
+    reorderWebProjects(reordered)
+  }
+
+  const handleWebAdd = async ({ form, imageSlots }) => {
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      const newProject = await addWebProject(form, imageSlots)
+      setWebProjects(prev => [...prev, newProject])
+      setWebView('list')
+    } catch {
+      setSaveError('SAVE FAILED — CHECK FIREBASE CONFIG')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleWebEdit = async ({ form, imageSlots }) => {
+    setIsSaving(true)
+    setSaveError(null)
+    try {
+      const { images } = await updateWebProject(webEditing.id, form, imageSlots)
+      setWebProjects(prev => prev.map(p =>
+        p.id === webEditing.id ? { ...p, ...form, images } : p
+      ))
+      setWebView('list')
+      setWebEditing(null)
+    } catch {
+      setSaveError('UPDATE FAILED — CHECK FIREBASE CONFIG')
+    } finally {
+      setIsSaving(false)
+    }
+  }
+
+  const handleWebDeleteConfirmed = async () => {
+    const project = webProjects.find(p => p.id === webDeleteConfirm)
+    if (!project) return
+    try {
+      await deleteWebProject(project)
+      setWebProjects(prev => prev.filter(p => p.id !== webDeleteConfirm))
+    } catch {}
+    setWebDeleteConfirm(null)
+  }
+
+  const isWebTab = activeTab === 'web'
+
   return (
-    <div className="min-h-screen bg-white">
-      <header className="fixed top-0 left-0 right-0 h-[60px] px-6 flex items-center justify-between bg-white border-b border-gray-100 z-[100]">
+    <div className={`min-h-screen ${isWebTab ? 'bg-black' : 'bg-white'}`}>
+      <header className={`fixed top-0 left-0 right-0 h-[60px] px-6 flex items-center justify-between z-[100] border-b ${isWebTab ? 'bg-black border-white/10' : 'bg-white border-gray-100'}`}>
         <Link to="/" className="flex items-center">
           <img
             src="/logo.svg"
             alt="Logo"
             className="transition-opacity duration-150 hover:opacity-75"
-            style={{ height: '30px', filter: 'invert(1)' }}
+            style={{ height: '30px', filter: isWebTab ? 'none' : 'invert(1)' }}
             draggable={false}
           />
         </Link>
-        <span className="text-xs text-muted uppercase tracking-widest">ADMIN</span>
+        {/* Onglets GRAPHIC / WEB */}
+        <div className="flex items-center gap-6">
+          <button
+            onClick={() => setActiveTab('graphic')}
+            className={`text-xs uppercase tracking-widest transition-colors duration-150 ${
+              activeTab === 'graphic'
+                ? isWebTab ? 'text-white/40' : 'text-black'
+                : isWebTab ? 'text-white/20 hover:text-white/40' : 'text-muted hover:text-black'
+            }`}
+          >
+            GRAPHIC
+          </button>
+          <button
+            onClick={() => setActiveTab('web')}
+            className={`text-xs uppercase tracking-widest transition-colors duration-150 ${
+              activeTab === 'web'
+                ? 'text-white'
+                : 'text-muted hover:text-black'
+            }`}
+          >
+            WEB
+          </button>
+        </div>
         <button
           onClick={() => signOut(auth)}
-          className="text-xs uppercase tracking-widest text-muted hover:text-black transition-colors duration-150"
+          className={`text-xs uppercase tracking-widest transition-colors duration-150 ${isWebTab ? 'text-white/40 hover:text-white' : 'text-muted hover:text-black'}`}
         >
           LOGOUT
         </button>
       </header>
 
       <main className="pt-[80px] pb-16 px-6 max-w-4xl mx-auto">
+
+        {/* ════ ONGLET GRAPHIC ════ */}
+        {activeTab === 'graphic' && (
+        <>
 
         {/* ── LISTE ── */}
         {view === 'list' && (
@@ -1165,6 +1775,7 @@ export default function Admin() {
                         project={project}
                         onEdit={(p) => { setSaveError(null); setEditing(p); setView('edit') }}
                         onDelete={(id) => setDeleteConfirm(id)}
+                        onToggle={handleToggleVisibility}
                       />
                     ))}
                   </div>
@@ -1233,6 +1844,117 @@ export default function Admin() {
             </div>
           </div>
         )}
+
+        </> /* fin onglet GRAPHIC */
+        )}
+
+        {/* ════ ONGLET WEB ════ */}
+        {activeTab === 'web' && (
+        <>
+
+          {/* ── LISTE WEB ── */}
+          {webView === 'list' && (
+            <>
+              <div className="flex items-center justify-between py-8">
+                <span className="text-xs text-white/40 uppercase tracking-widest">
+                  {webProjects.length} WEB PROJECTS
+                </span>
+                <button
+                  onClick={() => { setSaveError(null); setWebView('add') }}
+                  className="text-xs uppercase tracking-widest text-white hover:opacity-60 transition-opacity duration-150"
+                >
+                  + ADD WEB PROJECT
+                </button>
+              </div>
+
+              {webLoading ? (
+                <span className="text-xs text-white/40 uppercase tracking-widest">LOADING...</span>
+              ) : (
+                <DndContext collisionDetection={closestCenter} onDragEnd={handleWebDragEnd}>
+                  <SortableContext
+                    items={webProjects.map(p => p.id)}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <div className="flex flex-col">
+                      {webProjects.map(project => (
+                        <SortableWebRow
+                          key={project.id}
+                          project={project}
+                          onEdit={(p) => { setSaveError(null); setWebEditing(p); setWebView('edit') }}
+                          onDelete={(id) => setWebDeleteConfirm(id)}
+                          onToggle={handleWebToggleVisibility}
+                        />
+                      ))}
+                    </div>
+                  </SortableContext>
+                </DndContext>
+              )}
+            </>
+          )}
+
+          {/* ── AJOUT WEB ── */}
+          {webView === 'add' && (
+            <>
+              <div className="py-8">
+                <span className="text-xs text-white/40 uppercase tracking-widest">NEW WEB PROJECT</span>
+              </div>
+              <WebProjectForm
+                initial={null}
+                onSave={handleWebAdd}
+                onCancel={() => setWebView('list')}
+                isSaving={isSaving}
+                saveError={saveError}
+              />
+            </>
+          )}
+
+          {/* ── ÉDITION WEB ── */}
+          {webView === 'edit' && webEditing && (
+            <>
+              <div className="py-8">
+                <span className="text-xs text-white/40 uppercase tracking-widest">
+                  EDIT — {webEditing.client}
+                </span>
+              </div>
+              <WebProjectForm
+                initial={webEditing}
+                onSave={handleWebEdit}
+                onCancel={() => { setWebView('list'); setWebEditing(null) }}
+                isSaving={isSaving}
+                saveError={saveError}
+              />
+            </>
+          )}
+
+          {/* ── CONFIRMATION SUPPRESSION WEB ── */}
+          {webDeleteConfirm && (
+            <div className="fixed inset-0 flex items-center justify-center bg-white/80 backdrop-blur-sm z-[200]">
+              <div className="flex flex-col items-center gap-6 p-10 bg-white border border-gray-100">
+                <span className="text-xs uppercase tracking-widest text-muted">DELETE THIS WEB PROJECT?</span>
+                <span className="text-sm uppercase tracking-wide">
+                  {webProjects.find(p => p.id === webDeleteConfirm)?.client}
+                </span>
+                <div className="flex gap-8">
+                  <button
+                    onClick={handleWebDeleteConfirmed}
+                    className="text-xs uppercase tracking-widest hover:opacity-60 transition-opacity duration-150"
+                  >
+                    CONFIRM
+                  </button>
+                  <button
+                    onClick={() => setWebDeleteConfirm(null)}
+                    className="text-xs uppercase tracking-widest text-muted hover:text-black transition-colors duration-150"
+                  >
+                    CANCEL
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+        </> /* fin onglet WEB */
+        )}
+
       </main>
     </div>
   )

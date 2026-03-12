@@ -11,7 +11,7 @@ export default function ProjectGrid({ projects = [], currentFilter, currentColum
   // Classes de grille dynamiques
   const getGridClasses = () => {
     const base = 'grid'
-    const gap  = 'gap-4 md:gap-6'
+    const gap  = 'gap-6 md:gap-10'
 
     switch (currentColumns) {
       case 1:  return `${base} grid-cols-1 ${gap}`
@@ -23,14 +23,14 @@ export default function ProjectGrid({ projects = [], currentFilter, currentColum
   }
 
   return (
-    <section className="px-4 md:px-6 py-6">
+    <section data-grid className="px-4 md:px-6 py-6">
       <div key={currentColumns} className={getGridClasses()}>
         {filteredProjects.map((project, i) => (
           <ProjectCard
             key={project.id}
             project={project}
             onClick={onProjectClick}
-            style={{ animationDelay: `${Math.min(i * 40, 500)}ms` }}
+style={{ animationDelay: `${Math.min(i * 40, 500)}ms` }}
           />
         ))}
       </div>

@@ -1,8 +1,15 @@
+import { useLocation } from 'react-router-dom'
+
 export default function Footer() {
+  const location = useLocation()
+  const isWeb    = location.pathname.startsWith('/web')
+
   return (
-    <footer className="px-4 md:px-6 py-6 flex flex-col md:flex-row items-center justify-between bg-white text-xs uppercase tracking-wide mt-auto gap-4 md:gap-0 text-center md:text-left">
+    <footer className={`px-4 md:px-6 py-6 flex flex-col md:flex-row items-center justify-between text-xs uppercase tracking-wide mt-auto gap-4 md:gap-0 text-center md:text-left transition-colors duration-300 ${
+      isWeb ? 'bg-black text-white/40 border-t border-white/10' : 'bg-white text-black'
+    }`}>
       <div className="flex-1">
-        <span>MAËL AUZENET© 2026</span>
+        <a href="https://www.instagram.com/azt.mam/" target="_blank" rel="noopener noreferrer" className="underline">INSTAGRAM © 2026</a>
         <br />
         <span>POWER BY <a href="https://sordulo.web.app/" target="_blank" rel="noopener noreferrer" className="underline">SORDULO</a></span>
       </div>
