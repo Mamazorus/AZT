@@ -11,7 +11,7 @@ export default function Footer() {
       <div className="flex-1">
         <a href="https://www.instagram.com/azt.mam/" target="_blank" rel="noopener noreferrer" className="underline">INSTAGRAM © 2026</a>
         <br />
-        <span>POWER BY <a href="https://sordulo.web.app/" target="_blank" rel="noopener noreferrer" className="underline">SORDULO</a></span>
+        <span>POWER BY <a href="https://sordulo.com" target="_blank" rel="noopener noreferrer" className="underline">SORDULO</a></span>
       </div>
       <div className="flex-1 md:text-center">
         <span>PARIS, ÎLE DE FRANCE</span>
