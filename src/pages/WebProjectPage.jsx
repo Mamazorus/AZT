@@ -118,21 +118,7 @@ export default function WebProjectPage() {
           WEB
         </button>
         <span className="text-xs text-white/20 uppercase tracking-widest">{project.number}</span>
-        {project.url ? (
-          <a
-            href={formatUrl(project.url)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center gap-1.5 text-xs uppercase tracking-widest text-white/40 hover:text-white transition-colors duration-150"
-          >
-            VISIT
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M7 17L17 7M17 7H7M17 7v10" />
-            </svg>
-          </a>
-        ) : (
-          <div className="w-14" />
-        )}
+        <div className="w-14" />
       </div>
 
       {/* ── Layout principal ──────────────────────────────────────────────────── */}

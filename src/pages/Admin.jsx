@@ -676,7 +676,7 @@ function LoginGate() {
             onChange={e => setEmail(e.target.value)}
             required
             autoFocus
-            className="border-b border-white bg-transparent outline-none text-sm py-1 tracking-wide text-white"
+            className="border-b border-black bg-transparent outline-none text-sm py-1 tracking-wide text-black"
           />
         </label>
 
@@ -687,7 +687,7 @@ function LoginGate() {
             value={password}
             onChange={e => setPassword(e.target.value)}
             required
-            className="border-b border-white bg-transparent outline-none text-sm py-1 tracking-wide text-white"
+            className="border-b border-black bg-transparent outline-none text-sm py-1 tracking-wide text-black"
           />
         </label>
 
@@ -790,7 +790,7 @@ function SortableRow({ project, onEdit, onDelete, onToggle }) {
 }
 
 // ─── SortableSlot ─────────────────────────────────────────────────────────────
-function SortableSlot({ slot, index, onFileSelect }) {
+function SortableSlot({ slot, index, onFileSelect, onCrop }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slot.id })
   const fileRef = useRef()
 
@@ -805,11 +805,7 @@ function SortableSlot({ slot, index, onFileSelect }) {
   return (
     <div ref={setNodeRef} style={style} className="flex flex-col gap-2">
       <div className="relative">
-        <button
-          type="button"
-          onClick={() => fileRef.current.click()}
-          className="aspect-[3/4] bg-black relative overflow-hidden group w-full block"
-        >
+        <div className="aspect-[3/4] bg-black relative overflow-hidden group w-full">
           {slot.url && slot.type === 'video' ? (
             <video
               src={slot.url}
@@ -827,12 +823,18 @@ function SortableSlot({ slot, index, onFileSelect }) {
               <span className="text-xs text-muted">{String(index + 1).padStart(2, '0')}</span>
             </div>
           )}
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-            <span className="text-xs text-white uppercase tracking-wide">
-              {slot.url ? 'RECADRER' : 'AJOUTER'}
-            </span>
-          </div>
-        </button>
+          {slot.url && slot.type !== 'video' ? (
+            <div className="absolute inset-0 flex items-center justify-center gap-3 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <button type="button" onClick={() => onCrop(slot.id)} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">RECADRER</button>
+              <span className="text-white/20 text-xs">|</span>
+              <button type="button" onClick={() => fileRef.current.click()} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">REMPLACER</button>
+            </div>
+          ) : !slot.url ? (
+            <button type="button" onClick={() => fileRef.current.click()} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <span className="text-xs text-white uppercase tracking-wide">AJOUTER</span>
+            </button>
+          ) : null}
+        </div>
 
         {/* Poignée de drag — coin supérieur gauche */}
         <button
@@ -901,6 +903,12 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   // ── Handlers image slots ───────────────────────────────────────────────────
+  const handleSlotCrop = (slotId) => {
+    const slot = slots.find(s => s.id === slotId)
+    if (!slot?.url) return
+    setCropModal({ target: 'slot', id: slotId, src: slot.url, isExistingUrl: !slot.url.startsWith('blob:') })
+  }
+
   const handleSlotFileSelect = (slotId, file) => {
     if (!file) return
     if (file.type.startsWith('video/')) {
@@ -911,6 +919,11 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
   }
 
   // ── Handlers thumbnail ─────────────────────────────────────────────────────
+  const handleThumbCrop = () => {
+    if (!thumbUrl) return
+    setCropModal({ target: 'thumb', src: thumbUrl, isExistingUrl: !thumbUrl.startsWith('blob:') })
+  }
+
   const handleThumbFileSelect = (file) => {
     if (!file) return
     setCropModal({ target: 'thumb', src: URL.createObjectURL(file) })
@@ -918,8 +931,8 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
 
   // ── Crop confirm ───────────────────────────────────────────────────────────
   const handleCropConfirm = (blob) => {
-    const { target, src } = cropModal
-    URL.revokeObjectURL(src)
+    const { target, src, isExistingUrl } = cropModal
+    if (!isExistingUrl) URL.revokeObjectURL(src)
 
     if (target === 'slot') {
       const { id } = cropModal
@@ -972,7 +985,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
         <CropModal
           imageSrc={cropModal.src}
           onConfirm={handleCropConfirm}
-          onCancel={() => { URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
+          onCancel={() => { if (!cropModal.isExistingUrl) URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
           aspectOptions={GRAPHIC_ASPECT_OPTIONS}
         />
       )}
@@ -1036,11 +1049,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
         <div>
           <span className="text-xs text-muted uppercase tracking-wider">THUMBNAIL — HOME PAGE</span>
           <div className="mt-4 flex items-start gap-5">
-            <button
-              type="button"
-              onClick={() => thumbInputRef.current.click()}
-              className="w-20 aspect-[3/4] bg-black relative overflow-hidden group flex-shrink-0"
-            >
+            <div className="w-20 aspect-[3/4] bg-black relative overflow-hidden group flex-shrink-0">
               {thumbUrl ? (
                 <img
                   src={thumbUrl}
@@ -1052,12 +1061,17 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
                   <span className="text-xs text-muted">+</span>
                 </div>
               )}
-              <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-                <span className="text-[10px] text-white uppercase tracking-wide">
-                  {thumbUrl ? 'RECADRER' : 'AJOUTER'}
-                </span>
-              </div>
-            </button>
+              {thumbUrl ? (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-1.5 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  <button type="button" onClick={handleThumbCrop} className="text-[9px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">RECADRER</button>
+                  <button type="button" onClick={() => thumbInputRef.current.click()} className="text-[9px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">REMPLACER</button>
+                </div>
+              ) : (
+                <button type="button" onClick={() => thumbInputRef.current.click()} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+                  <span className="text-[10px] text-white uppercase tracking-wide">AJOUTER</span>
+                </button>
+              )}
+            </div>
             <p className="text-xs text-muted leading-relaxed pt-1">
               Image distincte affichée dans la grille de la home page.
               {!thumbUrl && (
@@ -1087,6 +1101,7 @@ function ProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
                     slot={slot}
                     index={i}
                     onFileSelect={handleSlotFileSelect}
+                    onCrop={handleSlotCrop}
                   />
                 ))}
               </div>
@@ -1209,7 +1224,7 @@ function SortableWebRow({ project, onEdit, onDelete, onToggle }) {
 }
 
 // ─── WebImageSlot ─────────────────────────────────────────────────────────────
-function WebImageSlot({ slot, index, onFileSelect, onRemove }) {
+function WebImageSlot({ slot, index, onFileSelect, onRemove, onCrop }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slot.id })
   const fileRef = useRef()
 
@@ -1226,22 +1241,24 @@ function WebImageSlot({ slot, index, onFileSelect, onRemove }) {
   return (
     <div ref={setNodeRef} style={style}>
       <div className="relative group">
-        <button
-          type="button"
-          onClick={() => fileRef.current?.click()}
-          className="w-full aspect-video bg-black relative overflow-hidden block"
-        >
+        <div className="w-full aspect-video bg-black relative overflow-hidden">
           {isVideo ? (
             <video src={slot.url} muted className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
           ) : (
             <img src={slot.url} alt={`Image ${index + 1}`} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
           )}
-          <div className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-            <span className="text-[10px] text-white uppercase tracking-wide">
-              MODIFIER{index === 0 ? ' · MINIATURE LISTING' : ''}
-            </span>
-          </div>
-        </button>
+          {!isVideo ? (
+            <div className="absolute inset-0 flex items-center justify-center gap-3 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <button type="button" onClick={() => onCrop(slot.id)} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">RECADRER</button>
+              <span className="text-white/20 text-xs">|</span>
+              <button type="button" onClick={() => fileRef.current?.click()} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">REMPLACER</button>
+            </div>
+          ) : (
+            <button type="button" onClick={() => fileRef.current?.click()} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+              <span className="text-[10px] text-white uppercase tracking-wide">REMPLACER</span>
+            </button>
+          )}
+        </div>
 
         {/* Poignée drag */}
         <button
@@ -1307,6 +1324,12 @@ function WebProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
   const webImgSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
 
   // ── Handlers images ────────────────────────────────────────────────────────
+  const handleImageCrop = (slotId) => {
+    const slot = imageSlots.find(s => s.id === slotId)
+    if (!slot?.url || /\.(mp4|webm|mov)/i.test(slot.url)) return
+    setCropModal({ id: slotId, src: slot.url, isExistingUrl: !slot.url.startsWith('blob:') })
+  }
+
   const handleImageFileSelect = (slotId, file) => {
     if (!file) return
     if (file.type.startsWith('video/')) {
@@ -1338,8 +1361,8 @@ function WebProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
 
   // ── Crop confirm ───────────────────────────────────────────────────────────
   const handleCropConfirm = (blob) => {
-    const { id, src } = cropModal
-    URL.revokeObjectURL(src)
+    const { id, src, isExistingUrl } = cropModal
+    if (!isExistingUrl) URL.revokeObjectURL(src)
     if (id === 'new') {
       setImageSlots(prev => [...prev, { id: `img-${Date.now()}`, blob, url: URL.createObjectURL(blob) }])
     } else {
@@ -1362,7 +1385,7 @@ function WebProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
         <CropModal
           imageSrc={cropModal.src}
           onConfirm={handleCropConfirm}
-          onCancel={() => { URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
+          onCancel={() => { if (!cropModal.isExistingUrl) URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
           aspectOptions={WEB_ASPECT_OPTIONS}
         />
       )}
@@ -1449,6 +1472,7 @@ function WebProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
                     index={i}
                     onFileSelect={handleImageFileSelect}
                     onRemove={removeImageSlot}
+                    onCrop={handleImageCrop}
                   />
                 ))}
               </SortableContext>
