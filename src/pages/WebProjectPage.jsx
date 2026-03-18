@@ -141,7 +141,9 @@ export default function WebProjectPage() {
               <span className="text-sm text-white/40">{project.year}</span>
             </div>
             {project.description && (
-              <p className="text-sm text-white/50 leading-relaxed">{project.description}</p>
+              <div className="text-sm text-white/50 leading-relaxed whitespace-pre-wrap">
+                {project.description}
+              </div>
             )}
             {project.url && (
               <a
