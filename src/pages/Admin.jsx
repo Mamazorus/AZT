@@ -130,35 +130,55 @@ async function getNextWebNumber() {
   return { number: String(snapshot.size + 1).padStart(2, '0'), order: snapshot.size }
 }
 
-async function addWebProject(form, imageSlots) {
+async function addWebProject(form, blocks) {
   const { number, order } = await getNextWebNumber()
   const tempId = `temp_web_${Date.now()}`
 
-  const images = []
-  for (let i = 0; i < imageSlots.length; i++) {
-    const s = imageSlots[i]
-    const isVid = s.blob instanceof File ? s.blob.type.startsWith('video/') : false
-    images.push(s.blob ? await uploadWebBlob(s.blob, tempId, `img-${i}`, isVid) : (s.url || ''))
+  const savedBlocks = []
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi]
+    const savedItems = []
+    for (let ii = 0; ii < block.items.length; ii++) {
+      const item = block.items[ii]
+      let url = item.url || ''
+      if (item.blob) {
+        const isVid = item.blob instanceof File && item.blob.type.startsWith('video/')
+        url = await uploadWebBlob(item.blob, tempId, `b${bi}-i${ii}`, isVid)
+      }
+      savedItems.push({ url })
+    }
+    savedBlocks.push({ id: block.id, type: block.type, bgColor: block.bgColor, items: savedItems })
   }
+  const images = savedBlocks[0]?.items?.[0]?.url ? [savedBlocks[0].items[0].url] : []
 
   const docRef = await withTimeout(
     addDoc(collection(db, 'webProjects'), {
-      number, order, ...form, images, createdAt: serverTimestamp(),
+      number, order, ...form, blocks: savedBlocks, images, createdAt: serverTimestamp(),
     })
   )
-  return { id: docRef.id, number, order, ...form, images }
+  return { id: docRef.id, number, order, ...form, blocks: savedBlocks, images }
 }
 
-async function updateWebProject(id, form, imageSlots) {
-  const images = []
-  for (let i = 0; i < imageSlots.length; i++) {
-    const s = imageSlots[i]
-    const isVid = s.blob instanceof File ? s.blob.type.startsWith('video/') : false
-    images.push(s.blob ? await uploadWebBlob(s.blob, id, `img-${i}`, isVid) : (s.url || ''))
+async function updateWebProject(id, form, blocks) {
+  const savedBlocks = []
+  for (let bi = 0; bi < blocks.length; bi++) {
+    const block = blocks[bi]
+    const savedItems = []
+    for (let ii = 0; ii < block.items.length; ii++) {
+      const item = block.items[ii]
+      let url = item.url || ''
+      if (item.blob) {
+        const isVid = item.blob instanceof File && item.blob.type.startsWith('video/')
+        url = await uploadWebBlob(item.blob, id, `b${bi}-i${ii}`, isVid)
+      }
+      savedItems.push({ url })
+    }
+    savedBlocks.push({ id: block.id, type: block.type, bgColor: block.bgColor, items: savedItems })
   }
+  const images = savedBlocks[0]?.items?.[0]?.url ? [savedBlocks[0].items[0].url] : []
 
-  await withTimeout(updateDoc(doc(db, 'webProjects', id), { ...form, images }))
-  return { images }
+  await withTimeout(updateDoc(doc(db, 'webProjects', id), { ...form, blocks: savedBlocks, images }))
+  return { blocks: savedBlocks, images }
 }
 
 async function deleteWebProject(project) {
@@ -166,6 +186,12 @@ async function deleteWebProject(project) {
   for (const url of (project.images || [])) {
     if (!url) continue
     try { await deleteObject(ref(storage, url)) } catch {}
+  }
+  for (const block of (project.blocks || [])) {
+    for (const item of (block.items || [])) {
+      if (!item.url) continue
+      try { await deleteObject(ref(storage, item.url)) } catch {}
+    }
   }
 }
 
@@ -297,6 +323,47 @@ const ASPECT_OPTIONS = [
 const WEB_ASPECT_OPTIONS = [
   { label: '16:9',   value: 16 / 9 },
   { label: 'CUSTOM', value: 'custom' },
+]
+
+const WEB_BLOCK_TYPES = [
+  {
+    id: 'full',
+    label: '16:9',
+    itemCount: 1,
+    description: 'Image pleine largeur',
+    itemAspects: [
+      [{ label: '16:9', value: 16 / 9 }, { label: 'CUSTOM', value: 'custom' }],
+    ],
+  },
+  {
+    id: 'duo',
+    label: 'DUO',
+    itemCount: 2,
+    description: '2 images côte à côte',
+    itemAspects: [
+      [{ label: '1:1', value: 1 }, { label: '4:3', value: 4 / 3 }, { label: 'CUSTOM', value: 'custom' }],
+      [{ label: '1:1', value: 1 }, { label: '4:3', value: 4 / 3 }, { label: 'CUSTOM', value: 'custom' }],
+    ],
+  },
+  {
+    id: 'portrait',
+    label: 'PORTRAIT',
+    itemCount: 1,
+    description: '1 image portrait centrée',
+    itemAspects: [
+      [{ label: '3:4', value: 3 / 4 }, { label: '2:3', value: 2 / 3 }, { label: 'CUSTOM', value: 'custom' }],
+    ],
+  },
+  {
+    id: 'wide-narrow',
+    label: '2/3 + 1/3',
+    itemCount: 2,
+    description: 'Grande image + petite image',
+    itemAspects: [
+      [{ label: '16:9', value: 16 / 9 }, { label: 'CUSTOM', value: 'custom' }],
+      [{ label: '1:1', value: 1 }, { label: 'CUSTOM', value: 'custom' }],
+    ],
+  },
 ]
 
 const GRAPHIC_ASPECT_OPTIONS = [
@@ -1223,10 +1290,112 @@ function SortableWebRow({ project, onEdit, onDelete, onToggle }) {
   )
 }
 
-// ─── WebImageSlot ─────────────────────────────────────────────────────────────
-function WebImageSlot({ slot, index, onFileSelect, onRemove, onCrop }) {
-  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: slot.id })
+// ─── Block editor components ───────────────────────────────────────────────────
+function BlockTypePreview({ typeId }) {
+  if (typeId === 'full') {
+    return <div className="w-full h-8 bg-white/15 rounded-sm" />
+  }
+  if (typeId === 'duo') {
+    return (
+      <div className="flex gap-1 h-8">
+        <div className="flex-1 bg-white/15 rounded-sm" />
+        <div className="flex-1 bg-white/15 rounded-sm" />
+      </div>
+    )
+  }
+  if (typeId === 'portrait') {
+    return (
+      <div className="flex justify-center h-12">
+        <div className="w-1/2 bg-white/15 rounded-sm h-full" />
+      </div>
+    )
+  }
+  if (typeId === 'wide-narrow') {
+    return (
+      <div className="flex gap-1 h-8">
+        <div className="flex-[2] bg-white/15 rounded-sm" />
+        <div className="flex-1 bg-white/15 rounded-sm" />
+      </div>
+    )
+  }
+  return null
+}
+
+function BlockTypePicker({ onSelect, onCancel }) {
+  return (
+    <div className="fixed inset-0 z-[200] bg-black/80 backdrop-blur-sm flex items-center justify-center p-8">
+      <div className="bg-[#111] border border-white/10 p-6 flex flex-col gap-5 max-w-md w-full">
+        <div className="flex items-center justify-between">
+          <span className="text-xs text-muted uppercase tracking-wider">TYPE DE BLOC</span>
+          <button type="button" onClick={onCancel} className="text-white/40 hover:text-white text-xl leading-none transition-colors">×</button>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          {WEB_BLOCK_TYPES.map(type => (
+            <button
+              key={type.id}
+              type="button"
+              onClick={() => onSelect(type.id)}
+              className="border border-white/10 hover:border-white/40 p-4 flex flex-col gap-3 transition-colors duration-150 text-left"
+            >
+              <BlockTypePreview typeId={type.id} />
+              <div>
+                <div className="text-xs text-white uppercase tracking-widest">{type.label}</div>
+                <div className="text-[10px] text-muted mt-0.5 leading-relaxed">{type.description}</div>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function WebBlockItemSlot({ blockId, item, itemAspects, onFileSelect, onCrop }) {
   const fileRef = useRef()
+  const isVideo = /\.(mp4|webm|mov)/i.test(item.url) || (item.blob instanceof File && item.blob.type.startsWith('video/'))
+
+  return (
+    <div>
+      {item.url ? (
+        <div className="relative group aspect-video bg-zinc-900 overflow-hidden">
+          {isVideo ? (
+            <video src={item.url} muted className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
+          ) : (
+            <img src={item.url} alt="" className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
+          )}
+          <div className="absolute inset-0 flex items-center justify-center gap-3 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
+            {!isVideo && (
+              <>
+                <button type="button" onClick={() => onCrop(blockId, item.id, item.url, itemAspects)} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">RECADRER</button>
+                <span className="text-white/20 text-xs">|</span>
+              </>
+            )}
+            <button type="button" onClick={() => fileRef.current?.click()} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">REMPLACER</button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => fileRef.current?.click()}
+          className="w-full aspect-video bg-black/20 border border-dashed border-white/20 flex items-center justify-center hover:border-white/40 transition-colors duration-150 group"
+        >
+          <span className="text-xs text-muted uppercase tracking-widest group-hover:text-white transition-colors duration-150">+ MÉDIA</span>
+        </button>
+      )}
+      <input
+        ref={fileRef}
+        type="file"
+        accept="image/*,video/*"
+        className="hidden"
+        onChange={e => { if (e.target.files[0]) onFileSelect(blockId, item.id, e.target.files[0], itemAspects); e.target.value = '' }}
+      />
+    </div>
+  )
+}
+
+function WebBlockRow({ block, onBgColorChange, onItemFileSelect, onItemCrop, onRemove }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: block.id })
+  const typeDef = WEB_BLOCK_TYPES.find(t => t.id === block.type)
 
   const style = {
     transform: CSS.Transform.toString(transform),
@@ -1236,66 +1405,161 @@ function WebImageSlot({ slot, index, onFileSelect, onRemove, onCrop }) {
     zIndex: isDragging ? 10 : 'auto',
   }
 
-  const isVideo = slot.blob?.type?.startsWith('video/') || /\.(mp4|webm|mov)/i.test(slot.url)
-
   return (
-    <div ref={setNodeRef} style={style}>
-      <div className="relative group">
-        <div className="w-full aspect-video bg-black relative overflow-hidden">
-          {isVideo ? (
-            <video src={slot.url} muted className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
-          ) : (
-            <img src={slot.url} alt={`Image ${index + 1}`} className="w-full h-full object-cover opacity-80 group-hover:opacity-100 transition-opacity duration-150" />
-          )}
-          {!isVideo ? (
-            <div className="absolute inset-0 flex items-center justify-center gap-3 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-              <button type="button" onClick={() => onCrop(slot.id)} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">RECADRER</button>
-              <span className="text-white/20 text-xs">|</span>
-              <button type="button" onClick={() => fileRef.current?.click()} className="text-[10px] text-white uppercase tracking-wide hover:opacity-60 transition-opacity">REMPLACER</button>
-            </div>
-          ) : (
-            <button type="button" onClick={() => fileRef.current?.click()} className="absolute inset-0 flex items-center justify-center bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity duration-150">
-              <span className="text-[10px] text-white uppercase tracking-wide">REMPLACER</span>
-            </button>
-          )}
-        </div>
-
-        {/* Poignée drag */}
+    <div ref={setNodeRef} style={style} className="border border-white/10">
+      {/* En-tête du bloc */}
+      <div className="flex items-center gap-3 px-3 py-2 border-b border-white/10">
         <button
           type="button"
           {...attributes}
           {...listeners}
-          className="absolute top-2 left-2 cursor-grab active:cursor-grabbing text-white/50 hover:text-white p-1 touch-none transition-colors duration-150"
+          className="cursor-grab active:cursor-grabbing text-white/30 hover:text-white/60 touch-none transition-colors duration-150"
           tabIndex={-1}
         >
           <svg width="10" height="14" viewBox="0 0 12 16" fill="currentColor">
-            <circle cx="3" cy="3"  r="1.5" />
-            <circle cx="9" cy="3"  r="1.5" />
-            <circle cx="3" cy="8"  r="1.5" />
-            <circle cx="9" cy="8"  r="1.5" />
-            <circle cx="3" cy="13" r="1.5" />
-            <circle cx="9" cy="13" r="1.5" />
+            <circle cx="3" cy="3"  r="1.5" /><circle cx="9" cy="3"  r="1.5" />
+            <circle cx="3" cy="8"  r="1.5" /><circle cx="9" cy="8"  r="1.5" />
+            <circle cx="3" cy="13" r="1.5" /><circle cx="9" cy="13" r="1.5" />
           </svg>
         </button>
 
-        {/* Supprimer */}
+        <span className="text-xs text-white uppercase tracking-widest flex-1">{typeDef?.label ?? block.type}</span>
+
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted uppercase tracking-wider">BG</span>
+          <label className="relative cursor-pointer">
+            <div
+              className="w-5 h-5 border border-white/20 rounded-sm cursor-pointer"
+              style={{ backgroundColor: block.bgColor ?? '#000000' }}
+            />
+            <input
+              type="color"
+              value={block.bgColor ?? '#000000'}
+              onChange={e => onBgColorChange(e.target.value)}
+              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+            />
+          </label>
+        </div>
+
+        <button type="button" onClick={onRemove} className="text-white/30 hover:text-red-400 text-xl leading-none transition-colors duration-150">×</button>
+      </div>
+
+      {/* Slots image */}
+      <div className={`p-3 flex gap-3 ${block.type === 'portrait' ? 'justify-center' : ''}`}>
+        {block.items.map((item, ii) => {
+          const itemAspects = typeDef?.itemAspects?.[ii] ?? [{ label: '16:9', value: 16 / 9 }]
+          return (
+            <div key={item.id} className={block.type === 'portrait' ? 'w-1/2' : 'flex-1'}>
+              <WebBlockItemSlot
+                blockId={block.id}
+                item={item}
+                itemAspects={itemAspects}
+                onFileSelect={onItemFileSelect}
+                onCrop={onItemCrop}
+              />
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function WebBlockEditor({ blocks, onChange }) {
+  const [cropModal,      setCropModal]      = useState(null)
+  const [showTypePicker, setShowTypePicker] = useState(false)
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
+
+  const handleAddBlock = (typeId) => {
+    const typeDef = WEB_BLOCK_TYPES.find(t => t.id === typeId)
+    const blockId = `block-${Date.now()}`
+    onChange([...blocks, {
+      id:      blockId,
+      type:    typeId,
+      bgColor: '#000000',
+      items:   Array.from({ length: typeDef.itemCount }, (_, i) => ({
+        id: `${blockId}-item-${i}`, url: '', blob: null,
+      })),
+    }])
+    setShowTypePicker(false)
+  }
+
+  const updateBlock = (blockId, changes) =>
+    onChange(blocks.map(b => b.id === blockId ? { ...b, ...changes } : b))
+
+  const handleItemFileSelect = (blockId, itemId, file, itemAspects) => {
+    if (!file) return
+    if (file.type.startsWith('video/')) {
+      const url = URL.createObjectURL(file)
+      onChange(blocks.map(b => b.id !== blockId ? b : {
+        ...b, items: b.items.map(it => it.id === itemId ? { ...it, blob: file, url } : it),
+      }))
+    } else {
+      setCropModal({ blockId, itemId, src: URL.createObjectURL(file), isExistingUrl: false, aspectOptions: itemAspects })
+    }
+  }
+
+  const handleItemCrop = (blockId, itemId, currentUrl, itemAspects) => {
+    if (!currentUrl || /\.(mp4|webm|mov)/i.test(currentUrl)) return
+    setCropModal({ blockId, itemId, src: currentUrl, isExistingUrl: !currentUrl.startsWith('blob:'), aspectOptions: itemAspects })
+  }
+
+  const handleCropConfirm = (blob) => {
+    const { blockId, itemId, src, isExistingUrl } = cropModal
+    if (!isExistingUrl) URL.revokeObjectURL(src)
+    const newUrl = URL.createObjectURL(blob)
+    onChange(blocks.map(b => b.id !== blockId ? b : {
+      ...b, items: b.items.map(it => it.id === itemId ? { ...it, blob, url: newUrl } : it),
+    }))
+    setCropModal(null)
+  }
+
+  const removeBlock = (blockId) => onChange(blocks.filter(b => b.id !== blockId))
+
+  const handleDragEnd = ({ active, over }) => {
+    if (over && active.id !== over.id) {
+      const oldIdx = blocks.findIndex(b => b.id === active.id)
+      const newIdx = blocks.findIndex(b => b.id === over.id)
+      onChange(arrayMove(blocks, oldIdx, newIdx))
+    }
+  }
+
+  return (
+    <>
+      {cropModal && (
+        <CropModal
+          imageSrc={cropModal.src}
+          aspectOptions={cropModal.aspectOptions}
+          onConfirm={handleCropConfirm}
+          onCancel={() => { if (!cropModal.isExistingUrl) URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
+        />
+      )}
+      {showTypePicker && <BlockTypePicker onSelect={handleAddBlock} onCancel={() => setShowTypePicker(false)} />}
+
+      <div className="flex flex-col gap-3">
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={blocks.map(b => b.id)} strategy={verticalListSortingStrategy}>
+            {blocks.map(block => (
+              <WebBlockRow
+                key={block.id}
+                block={block}
+                onBgColorChange={color => updateBlock(block.id, { bgColor: color })}
+                onItemFileSelect={handleItemFileSelect}
+                onItemCrop={handleItemCrop}
+                onRemove={() => removeBlock(block.id)}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
         <button
           type="button"
-          onClick={() => onRemove(slot.id)}
-          className="absolute top-2 right-2 bg-black/60 text-white/60 hover:text-white w-6 h-6 flex items-center justify-center text-sm transition-colors duration-150"
-        >×</button>
+          onClick={() => setShowTypePicker(true)}
+          className="w-full py-4 border border-dashed border-white/20 text-xs text-muted uppercase tracking-widest hover:border-white/40 hover:text-white transition-colors duration-150"
+        >
+          + AJOUTER UN BLOC
+        </button>
       </div>
-      <span className="text-xs text-muted mt-1 block">
-        {index === 0 ? 'MINIATURE LISTING' : `IMAGE ${index + 1}`}
-      </span>
-      <input
-        ref={fileRef}
-        type="file"
-        accept="image/*,video/*"
-        className="hidden"
-        onChange={e => { if (e.target.files[0]) onFileSelect(slot.id, e.target.files[0]); e.target.value = '' }}
-      />
-    </div>
+    </>
   )
 }
 
@@ -1314,82 +1578,42 @@ function WebProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
     description: initial?.description ?? '',
   })
 
-  // Images 16:9 dynamiques (listing + page projet) — uniquement les slots remplis
-  const [imageSlots, setImageSlots] = useState(() => {
-    const imgs = initial?.images?.filter(Boolean) ?? []
-    return imgs.map((url, i) => ({ id: `img-init-${i}`, blob: null, url }))
-  })
-
-  const [cropModal, setCropModal] = useState(null)
-  const webImgSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
-
-  // ── Handlers images ────────────────────────────────────────────────────────
-  const handleImageCrop = (slotId) => {
-    const slot = imageSlots.find(s => s.id === slotId)
-    if (!slot?.url || /\.(mp4|webm|mov)/i.test(slot.url)) return
-    setCropModal({ id: slotId, src: slot.url, isExistingUrl: !slot.url.startsWith('blob:') })
-  }
-
-  const handleImageFileSelect = (slotId, file) => {
-    if (!file) return
-    if (file.type.startsWith('video/')) {
-      const url = URL.createObjectURL(file)
-      if (slotId === 'new') {
-        setImageSlots(prev => [...prev, { id: `img-${Date.now()}`, blob: file, url }])
-      } else {
-        setImageSlots(prev => prev.map(s => s.id === slotId ? { ...s, blob: file, url } : s))
-      }
-    } else {
-      setCropModal({ id: slotId, src: URL.createObjectURL(file) })
+  // Blocs d'images (nouveau système)
+  const [blocks, setBlocks] = useState(() => {
+    if (initial?.blocks?.length) {
+      return initial.blocks.map(b => ({
+        ...b,
+        items: b.items.map((it, ii) => ({
+          id:   `${b.id}-item-${ii}`,
+          blob: null,
+          url:  it.url || '',
+        })),
+      }))
     }
-  }
-
-  const removeImageSlot = (slotId) => {
-    setImageSlots(prev => prev.filter(s => s.id !== slotId))
-  }
-
-  const handleWebImgDragEnd = (event) => {
-    const { active, over } = event
-    if (over && active.id !== over.id) {
-      setImageSlots(prev => {
-        const oldIndex = prev.findIndex(s => s.id === active.id)
-        const newIndex = prev.findIndex(s => s.id === over.id)
-        return arrayMove(prev, oldIndex, newIndex)
+    // Fallback: images legacy → blocs full individuels
+    const imgs = initial?.images?.filter(Boolean) ?? []
+    if (imgs.length) {
+      return imgs.map((url, i) => {
+        const blockId = `block-legacy-${i}`
+        return {
+          id:      blockId,
+          type:    'full',
+          bgColor: '#000000',
+          items:   [{ id: `${blockId}-item-0`, blob: null, url }],
+        }
       })
     }
-  }
-
-  // ── Crop confirm ───────────────────────────────────────────────────────────
-  const handleCropConfirm = (blob) => {
-    const { id, src, isExistingUrl } = cropModal
-    if (!isExistingUrl) URL.revokeObjectURL(src)
-    if (id === 'new') {
-      setImageSlots(prev => [...prev, { id: `img-${Date.now()}`, blob, url: URL.createObjectURL(blob) }])
-    } else {
-      setImageSlots(prev => prev.map(s =>
-        s.id === id ? { ...s, blob, url: URL.createObjectURL(blob) } : s
-      ))
-    }
-    setCropModal(null)
-  }
+    return []
+  })
 
   // ── Submit ─────────────────────────────────────────────────────────────────
   const handleSubmit = async (e) => {
     e.preventDefault()
-    await onSave({ form, imageSlots })
+    await onSave({ form, blocks })
   }
 
   return (
     <>
-      {cropModal && (
-        <CropModal
-          imageSrc={cropModal.src}
-          onConfirm={handleCropConfirm}
-          onCancel={() => { if (!cropModal.isExistingUrl) URL.revokeObjectURL(cropModal.src); setCropModal(null) }}
-          aspectOptions={WEB_ASPECT_OPTIONS}
-        />
-      )}
-
       <form onSubmit={handleSubmit} className="flex flex-col gap-8">
 
         {/* ── Champs texte ── */}
@@ -1458,45 +1682,12 @@ function WebProjectForm({ initial, onSave, onCancel, isSaving, saveError }) {
           </label>
         </div>
 
-        {/* ── Images 16:9 ── */}
+        {/* ── Blocs d'images ── */}
         <div>
-          <span className="text-xs text-muted uppercase tracking-wider">IMAGES</span>
-          <p className="text-xs text-muted opacity-50 mt-1">La première est la miniature de la liste. Glisser pour réordonner.</p>
-          <div className="flex flex-col gap-3 mt-4">
-            <DndContext sensors={webImgSensors} collisionDetection={closestCenter} onDragEnd={handleWebImgDragEnd}>
-              <SortableContext items={imageSlots.map(s => s.id)} strategy={verticalListSortingStrategy}>
-                {imageSlots.map((slot, i) => (
-                  <WebImageSlot
-                    key={slot.id}
-                    slot={slot}
-                    index={i}
-                    onFileSelect={handleImageFileSelect}
-                    onRemove={removeImageSlot}
-                    onCrop={handleImageCrop}
-                  />
-                ))}
-              </SortableContext>
-            </DndContext>
-
-            {/* Slot vide permanent pour ajouter */}
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => document.getElementById('img-input-new').click()}
-                className="w-full aspect-video bg-black/20 border border-dashed border-white/20 relative overflow-hidden group block hover:border-white/40 transition-colors duration-150"
-              >
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <span className="text-xs text-muted uppercase tracking-widest group-hover:text-white transition-colors duration-150">+ AJOUTER UN MÉDIA</span>
-                </div>
-              </button>
-              <input
-                id="img-input-new"
-                type="file"
-                accept="image/*,video/*"
-                className="hidden"
-                onChange={e => { if (e.target.files[0]) handleImageFileSelect('new', e.target.files[0]); e.target.value = '' }}
-              />
-            </div>
+          <span className="text-xs text-muted uppercase tracking-wider">BLOCS D'IMAGES</span>
+          <p className="text-xs text-muted opacity-50 mt-1">Le premier bloc détermine la miniature de la liste. Glisser pour réordonner.</p>
+          <div className="mt-4">
+            <WebBlockEditor blocks={blocks} onChange={setBlocks} />
           </div>
         </div>
 
@@ -1677,11 +1868,11 @@ export default function Admin() {
     reorderWebProjects(reordered)
   }
 
-  const handleWebAdd = async ({ form, imageSlots }) => {
+  const handleWebAdd = async ({ form, blocks }) => {
     setIsSaving(true)
     setSaveError(null)
     try {
-      const newProject = await addWebProject(form, imageSlots)
+      const newProject = await addWebProject(form, blocks)
       setWebProjects(prev => [...prev, newProject])
       setWebView('list')
     } catch {
@@ -1691,13 +1882,13 @@ export default function Admin() {
     }
   }
 
-  const handleWebEdit = async ({ form, imageSlots }) => {
+  const handleWebEdit = async ({ form, blocks }) => {
     setIsSaving(true)
     setSaveError(null)
     try {
-      const { images } = await updateWebProject(webEditing.id, form, imageSlots)
+      const { blocks: savedBlocks, images } = await updateWebProject(webEditing.id, form, blocks)
       setWebProjects(prev => prev.map(p =>
-        p.id === webEditing.id ? { ...p, ...form, images } : p
+        p.id === webEditing.id ? { ...p, ...form, blocks: savedBlocks, images } : p
       ))
       setWebView('list')
       setWebEditing(null)

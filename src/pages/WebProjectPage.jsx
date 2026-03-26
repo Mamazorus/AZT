@@ -97,11 +97,29 @@ export default function WebProjectPage() {
     )
   }
 
-  const images      = (project.images ?? []).filter(Boolean)
-  const thumbnail   = images[0] ?? null
-  const extraImages = images.slice(1)
-  const isThumbVideo = thumbnail && /\.(mp4|webm|mov)/i.test(thumbnail)
-  const isVideo = (url) => /\.(mp4|webm|mov)/i.test(url)
+  const blocks      = project.blocks ?? []
+  const hasBlocks   = blocks.length > 0
+  const isVideo     = (url) => /\.(mp4|webm|mov)/i.test(url)
+
+  // Legacy: projets sans blocs
+  const legacyImages = (project.images ?? []).filter(Boolean)
+  const legacyThumb  = legacyImages[0] ?? null
+  const legacyExtra  = legacyImages.slice(1)
+
+  const GAP = '12px'
+
+  const renderMedia = (url, cls, ref) => {
+    if (!url) return <div className={`${cls} bg-zinc-900`} ref={ref} />
+    return (
+      <div className={`${cls} relative overflow-hidden`} ref={ref}>
+        {isVideo(url) ? (
+          <PersistentVideo src={url} className="absolute inset-0 w-full h-full object-cover" />
+        ) : (
+          <img src={url} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+        )}
+      </div>
+    )
+  }
 
   return (
     <div data-web className="min-h-screen bg-black text-white">
@@ -162,50 +180,89 @@ export default function WebProjectPage() {
         </motion.aside>
 
         {/* ── Contenu scrollable ────────────────────────────────────────────── */}
-        <div className="flex-1 px-6 py-6 flex flex-col gap-4 pb-16">
+        <div className="flex-1 py-6 pb-16" style={{ display: 'flex', flexDirection: 'column', gap: GAP, paddingLeft: GAP, paddingRight: GAP }}>
 
-          {/* Thumbnail 16:9 — FLIP target */}
-          <div
-            ref={thumbRef}
-            className="w-full aspect-video relative overflow-hidden"
-          >
-            {thumbnail ? (
-              isThumbVideo ? (
-                <PersistentVideo src={thumbnail} />
-              ) : (
-                <img
-                  src={thumbnail}
-                  alt={project.client}
-                  className="absolute inset-0 w-full h-full object-cover"
-                  loading="lazy"
-                />
+          {hasBlocks ? (
+            blocks.map((block, bi) => {
+              const item0     = block.items?.[0]
+              const item1     = block.items?.[1]
+              const firstRef  = bi === 0 ? thumbRef : undefined
+              const bgStyle   = { backgroundColor: block.bgColor ?? '#000000' }
+
+              const blockContent = (() => {
+                if (block.type === 'duo') {
+                  return (
+                    <div style={{ ...bgStyle, display: 'flex', gap: GAP }}>
+                      {renderMedia(item0?.url, 'flex-1 aspect-square', firstRef)}
+                      {renderMedia(item1?.url, 'flex-1 aspect-square')}
+                    </div>
+                  )
+                }
+                if (block.type === 'portrait') {
+                  return (
+                    <div style={{ ...bgStyle, display: 'flex', justifyContent: 'center' }}>
+                      {renderMedia(item0?.url, 'w-2/3 aspect-[3/4]', firstRef)}
+                    </div>
+                  )
+                }
+                if (block.type === 'wide-narrow') {
+                  return (
+                    <div style={{ ...bgStyle, display: 'flex', gap: GAP }}>
+                      {renderMedia(item0?.url, 'flex-[2] aspect-video', firstRef)}
+                      {renderMedia(item1?.url, 'flex-1 aspect-square')}
+                    </div>
+                  )
+                }
+                // default: 'full'
+                return renderMedia(item0?.url, 'w-full aspect-video', firstRef)
+              })()
+
+              if (bi === 0) {
+                // Pas d'animation — le FLIP gère le premier bloc
+                return <div key={`${animKey}-block-${block.id ?? bi}`}>{blockContent}</div>
+              }
+              return (
+                <motion.div
+                  key={`${animKey}-block-${block.id ?? bi}`}
+                  initial={{ opacity: 0, y: 24 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.55, delay: 0.35 + bi * 0.12, ease: [0.22, 1, 0.36, 1] }}
+                >
+                  {blockContent}
+                </motion.div>
               )
-            ) : (
-              <div className="absolute inset-0 bg-zinc-900" />
-            )}
-          </div>
-
-          {/* Images / vidéos supplémentaires 16:9 */}
-          {extraImages.map((url, i) => (
-            <motion.div
-              key={`${animKey}-${i}`}
-              initial={{ opacity: 0, y: 24 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.55, delay: 0.5 + i * 0.15, ease: [0.22, 1, 0.36, 1] }}
-              className="w-full aspect-video relative overflow-hidden"
-            >
-              {isVideo(url) ? (
-                <PersistentVideo src={url} className="absolute inset-0 w-full h-full object-cover" />
-              ) : (
-                <img
-                  src={url}
-                  alt=""
-                  className="absolute inset-0 w-full h-full object-cover"
-                  loading="lazy"
-                />
-              )}
-            </motion.div>
-          ))}
+            })
+          ) : (
+            /* Legacy: projets sans blocs */
+            <>
+              <div ref={thumbRef} className="w-full aspect-video relative overflow-hidden">
+                {legacyThumb ? (
+                  isVideo(legacyThumb) ? (
+                    <PersistentVideo src={legacyThumb} />
+                  ) : (
+                    <img src={legacyThumb} alt={project.client} className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                  )
+                ) : (
+                  <div className="absolute inset-0 bg-zinc-900" />
+                )}
+              </div>
+              {legacyExtra.map((url, i) => (
+                <motion.div
+                  key={`${animKey}-${i}`}
+                  initial={{ opacity: 0, y: 24 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ duration: 0.55, delay: 0.5 + i * 0.15, ease: [0.22, 1, 0.36, 1] }}
+                  className="w-full aspect-video relative overflow-hidden"
+                >
+                  {isVideo(url) ? (
+                    <PersistentVideo src={url} className="absolute inset-0 w-full h-full object-cover" />
+                  ) : (
+                    <img src={url} alt="" className="absolute inset-0 w-full h-full object-cover" loading="lazy" />
+                  )}
+                </motion.div>
+              ))}
+            </>
+          )}
 
         </div>
       </div>
